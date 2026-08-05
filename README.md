@@ -1,6 +1,8 @@
 # Needs Material Dashboard
 
-Purchasing Work Queue for Kannon Manufacturing.
+**Purchasing Work Queue**
+
+Dashboard header shows the app name, subtitle, last refresh timestamp, and informational source `Production Scheduler - 2026.xlsx`.
 
 This repository is the runnable application baseline that preserves the Sunday prototype visual language and the approved Version 1 dashboard behavior.
 

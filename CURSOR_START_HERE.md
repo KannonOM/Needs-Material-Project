@@ -3,7 +3,9 @@
 Open this entire folder in Cursor.
 
 Application name: **Needs Material Dashboard**  
-Subtitle: **Purchasing Work Queue**
+Subtitle: **Purchasing Work Queue**  
+
+Dashboard header lines: title, subtitle, `Last Refresh: …`, and informational `Source: Production Scheduler - 2026.xlsx`.
 
 The exact Sunday prototype is preserved at `public/sunday-prototype.html` and can be opened directly in a browser.
 

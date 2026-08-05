@@ -2,6 +2,15 @@
 
 **Subtitle:** Purchasing Work Queue
 
+### Dashboard header (approved)
+
+Display compactly on the left, with Refresh actions on the right:
+
+1. Needs Material Dashboard  
+2. Purchasing Work Queue  
+3. Last Refresh: \<existing refresh timestamp\>  
+4. Source: Production Scheduler - 2026.xlsx (informational only)
+
 ## Controlling Direction
 
 Use the existing Sunday prototype visual language (colors, navigation chrome, typography, modals) as the styling baseline.

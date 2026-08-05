@@ -414,7 +414,10 @@ function Dashboard({kpis,kpiFilter,setKpiFilter,search,setSearch,visibleRows,sor
       <div>
         <h1>Needs Material Dashboard</h1>
         <p>Purchasing Work Queue</p>
-        <div className="refresh-note"><span className="dot"/>{loadingRows?"Loading from Supabase…":`Last loaded: ${lastRefresh}`}</div>
+        <div className="header-meta">
+          <div className="refresh-note"><span className="dot"/>Last Refresh: {loadingRows?"Loading…":lastRefresh}</div>
+          <div className="source-note">Source: Production Scheduler - 2026.xlsx</div>
+        </div>
       </div>
       <div className="actions">
         <button className="btn" onClick={()=>window.print()}>Export</button>
