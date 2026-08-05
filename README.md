@@ -27,6 +27,10 @@ This repository is the runnable application baseline that exactly preserves the 
 
 Read `PROJECT.md` before changing code. The visible UI is the exact baseline and must not be redesigned.
 
+## Database (Supabase)
+
+Phase 3 schema lives in `supabase/migrations/001_init.sql` with a safe admin seed in `supabase/seed.sql`. Setup steps: [docs/supabase.md](docs/supabase.md). The app UI still uses local sample data until later phases.
+
 ## Run locally
 
 ```bash

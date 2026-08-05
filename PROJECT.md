@@ -2,49 +2,80 @@
 
 ## Controlling Direction
 
-Use the existing Sunday prototype as the exact visual and functional baseline.
+Use the existing Sunday prototype visual language (colors, navigation chrome, typography, modals) as the styling baseline.
 
-The first production release must make the prototype real without redesigning it.
+**Approved Version 1 dashboard behavior** (below) is the functional baseline for the Needs Material table, KPI cards, Flats/Shapes summaries, and edit workflow. Do not add unapproved features beyond this document.
 
-## Do Not Change
+## Approved Version 1 Dashboard
 
-Do not change any of the following unless Chris Vieux explicitly approves it after real-world testing:
+### Scope of rows
 
-- Page layout
-- Navigation
-- Colors
-- Summary cards
-- Charts
-- Table layout
-- Existing columns
-- Filters
-- Search behavior
-- Administrator screen
-- User invitation workflow
-- Existing edit workflow
-- Labels
-- Terminology
-- Overall visual style
+- Show only **active** work orders where `production_status = "Need Material"`.
+- Do not show the full scheduler workbook.
+- No pagination — one vertically scrollable table with a **sticky header**.
+- Default sort: **Due Date ascending** (earliest first).
+- Real-time search and sortable column headers.
 
-## Do Not Add
+### Table columns (in order)
 
-Do not add any of the following in the first production release:
+1. WO  
+2. Customer PO (read-only, scheduler-controlled)  
+3. Customer  
+4. Due Date  
+5. Part Number  
+6. Qty  
+7. Flats (plain text summary only — no colors or icons)  
+8. Shapes (plain text summary only — no colors or icons)  
+9. Owner  
+10. Edit  
 
-- New reports
-- New charts
-- New navigation sections
-- Slide-out panels
-- New dashboard cards
-- New workflows
-- Unrequested visual enhancements
-- New columns
-- New role types
+### Flats / Shapes summary rules (one value per category)
+
+| Condition | Display |
+|---|---|
+| No material lines in the category | `None` |
+| Every line in the category has status `Received` | `Complete` |
+| One or more lines have EAD before today and are not `Received` | `N Late` (e.g. `1 Late`) — **Late takes priority over Open** |
+| Otherwise | `N Open` for lines not `Received` |
+
+### KPI cards (click filters the visible table only; never mutates saved data)
+
+- Open WO  
+- Overdue EAD  
+- Due This Week  
+- Waiting on Quote  
+- Late Suppliers  
+
+KPI values are calculated from active Need Material work orders and their material lines.
+
+### Edit modal
+
+- Owner and Notes on the work order  
+- Customer PO shown read-only  
+- Separate Flats and Shapes sections with repeatable lines  
+- Per line: Material Type (free text), Supplier, Material PO, EAD, Status  
+- `+ Add Flats Material` / `+ Add Shapes Material`  
+- Remove line with confirmation  
+- Status values: Not Ordered, Quote Requested, PO Issued, Supplier Confirmed, In Transit, Partially Received, Received, Problem / Escalation  
+- New lines default to **Not Ordered**
+
+### Do not change without approval
+
+- Overall visual style (navy/blue Sunday look)
+- Navigation chrome and Administration screen structure
+- User invitation workflow labels
+- Terminology (Need Material, Flats, Shapes, EAD)
+
+### Do not add in Version 1
+
+- Pagination
+- Color coding or icons in Flats/Shapes cells
+- New reports, charts, navigation sections, or role types
+- Supabase / Microsoft auth / SharePoint wiring in the UI prototype path (still local sample data + localStorage for UX validation)
 
 ## Goal
 
-Replace only the simulated systems behind the existing prototype.
-
-The visible interface should remain the same while the application becomes functional and secure.
+Make the approved Version 1 dashboard experience real and secure without redesigning the Sunday visual language.
 
 ## Live Production Source
 
@@ -91,15 +122,38 @@ These fields come from SharePoint and may be overwritten during refresh:
 
 ## Dashboard-Controlled Fields
 
-These fields are entered or updated in the dashboard and must never be overwritten by SharePoint refresh:
+These fields are entered or updated in the dashboard and must never be overwritten by SharePoint refresh.
 
-- Material Needed
-- Supplier
-- Material PO
-- Expected Arrival
-- Material Status
+### On the work order (`needs_material` parent)
+
 - Owner
 - Follow-Up Notes
+
+### On each material line (`material_lines` child)
+
+Each work order may have zero or more material lines. Lines are grouped by category:
+
+- Material Category: `Flats` or `Shapes`
+- Material Type (manual text entry)
+- Supplier
+- Material PO
+- EAD (expected arrival date)
+- Status (per line, not on the work order header)
+
+Allowed material-line status values:
+
+- Not Ordered
+- Quote Requested
+- PO Issued
+- Supplier Confirmed
+- In Transit
+- Partially Received
+- Received
+- Problem / Escalation
+
+New material lines default to `Not Ordered`.
+
+SharePoint refresh must never create, update, or delete material lines (including status). It only updates scheduler-controlled parent fields and lifecycle flags (`active`, `source_last_seen_at`).
 
 ## Authentication
 
@@ -191,7 +245,7 @@ Recommended tables:
 - created_at
 - updated_at
 
-### `needs_material`
+### `needs_material` (parent work order)
 - id
 - work_order
 - customer_po
@@ -203,15 +257,23 @@ Recommended tables:
 - description
 - quantity
 - production_status
-- material_needed
-- supplier
-- material_po
-- expected_arrival
-- material_status
 - owner
 - follow_up_notes
 - active
 - source_last_seen_at
+- created_at
+- updated_at
+
+### `material_lines` (child purchasing lines)
+- id
+- needs_material_id (FK → needs_material.id)
+- material_category (`Flats` or `Shapes`)
+- material_type
+- supplier
+- material_po
+- ead
+- status (default `Not Ordered`)
+- sort_order
 - created_at
 - updated_at
 
@@ -288,18 +350,20 @@ Use this prompt:
 
 The first production release is complete when:
 
-- It looks the same as the Sunday prototype.
+- The approved Version 1 dashboard behavior is in place (columns, KPIs, Flats/Shapes summaries, sticky scrollable table, no pagination).
+- Sunday visual styling remains consistent.
 - Microsoft 365 sign-in works.
 - Only allowlisted users can enter.
 - Chris Vieux is Administrator.
 - User invitations work.
 - Roles are enforced.
 - The live SharePoint workbook is used.
-- Only `Need Material` rows are active.
+- Only active `Need Material` rows appear on the dashboard.
 - The dashboard refreshes daily at 10:00 AM America/Chicago.
 - The manual Refresh Now button works.
-- Purchasing edits persist for all users.
-- SharePoint refresh never overwrites dashboard-controlled fields.
+- Purchasing edits persist for all users (owner, notes, and material lines).
+- Work orders support zero or more Flats/Shapes material lines.
+- SharePoint refresh never overwrites dashboard-controlled parent fields or material lines.
 - Inactive records are archived, not deleted.
 - Audit logging works.
 - The application is deployable to Vercel.
