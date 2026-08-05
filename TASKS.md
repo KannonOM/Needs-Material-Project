@@ -1,4 +1,4 @@
-# Kannon Needs Material Dashboard — Implementation Tasks
+# Needs Material Dashboard — Implementation Tasks
 
 ## Phase 1 — Inspect and Preserve
 - [ ] Read PROJECT.md

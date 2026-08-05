@@ -1,10 +1,12 @@
-# Kannon Manufacturing Needs Material Dashboard
+# Needs Material Dashboard
+
+**Subtitle:** Purchasing Work Queue
 
 ## Controlling Direction
 
 Use the existing Sunday prototype visual language (colors, navigation chrome, typography, modals) as the styling baseline.
 
-**Approved Version 1 dashboard behavior** (below) is the functional baseline for the Needs Material table, KPI cards, Flats/Shapes summaries, and edit workflow. Do not add unapproved features beyond this document.
+**Approved Version 1 dashboard behavior** (below) is the functional baseline for the Needs Material Dashboard table, KPI cards, Flats/Shapes summaries, and edit workflow. Do not add unapproved features beyond this document.
 
 ## Approved Version 1 Dashboard
 

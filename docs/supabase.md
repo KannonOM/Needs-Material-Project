@@ -1,4 +1,4 @@
-# Supabase setup — Scheduler Needs Material
+# Supabase setup — Needs Material Dashboard
 
 This project uses Supabase (PostgreSQL) for shared storage. The Sunday prototype UI still runs on local sample data and localStorage. Database work in Phase 3 only prepares the schema.
 
@@ -123,9 +123,16 @@ where conrelid = 'public.allowed_users'::regclass
 - Until Microsoft Entra authentication is implemented, the Next.js server should use `SUPABASE_SECRET_KEY` (service role), which bypasses RLS.
 - Policies that map Entra users to `allowed_users` and enforce roles cannot be finalized until Phase 4 (auth). Those will be added in a later migration.
 
-## What this phase does not do
+## Application connection (Version 1)
 
-- Does not change the Sunday prototype UI
-- Does not wire the Next.js app to Supabase yet
-- Does not replace sample data or localStorage
-- Does not implement Microsoft auth or SharePoint import
+The Next.js app reads/writes `needs_material` and `material_lines` through server API routes using `SUPABASE_SECRET_KEY`.
+
+1. Set in `.env.local`:
+   - `SUPABASE_URL`
+   - `SUPABASE_SECRET_KEY`
+2. Restart `npm run dev`.
+3. Open the dashboard and sign in (baseline local login).
+4. First load seeds sample work orders only if the table is empty.
+5. Edit/Save writes to Supabase and appends `audit_log` rows.
+
+Do not put the secret key in `NEXT_PUBLIC_*` variables.

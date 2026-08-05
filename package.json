@@ -1,5 +1,6 @@
 {
   "name": "kannon-needs-material-dashboard",
+  "description": "Needs Material Dashboard — Purchasing Work Queue",
   "version": "1.0.0",
   "private": true,
   "scripts": {
@@ -9,6 +10,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.1",
     "next": "^15.5.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

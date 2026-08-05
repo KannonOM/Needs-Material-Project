@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { sampleRows } from "../data/sample-data";
 
 const seedUsers=[
   {name:"Chris Vieux",email:"cvieux@kannonmfg.com",role:"Administrator",status:"Active",last:"Today"},
@@ -175,7 +174,9 @@ function compareValues(a,b,key){
 export default function SundayPrototype(){
   const [signedIn,setSignedIn]=useState(false);
   const [page,setPage]=useState("dashboard");
-  const [rows,setRows]=useState(()=>sampleRows.map(normalizeRow));
+  const [rows,setRows]=useState([]);
+  const [loadingRows,setLoadingRows]=useState(true);
+  const [savingEdit,setSavingEdit]=useState(false);
   const [users,setUsers]=useState(seedUsers);
   const [search,setSearch]=useState("");
   const [kpiFilter,setKpiFilter]=useState("all");
@@ -184,18 +185,82 @@ export default function SundayPrototype(){
   const [edit,setEdit]=useState(null);
   const [invite,setInvite]=useState(false);
   const [toast,setToast]=useState("");
-  const [lastRefresh,setLastRefresh]=useState("August 2, 2026 at 10:00 AM");
-
-  useEffect(()=>{try{
-    const u=localStorage.getItem("kannonPrototypeUsers");
-    const r=localStorage.getItem("kannonPrototypeRows");
-    if(u)setUsers(JSON.parse(u));
-    if(r)setRows(JSON.parse(r).map(normalizeRow));
-  }catch{}},[]);
+  const [lastRefresh,setLastRefresh]=useState("Not loaded yet");
 
   const notify=msg=>{setToast(msg);setTimeout(()=>setToast(""),3200)};
-  const saveRows=next=>{setRows(next);localStorage.setItem("kannonPrototypeRows",JSON.stringify(next));};
   const saveUsers=next=>{setUsers(next);localStorage.setItem("kannonPrototypeUsers",JSON.stringify(next));};
+
+  async function loadRowsFromApi({silent=false}={}){
+    if(!silent)setLoadingRows(true);
+    try{
+      const res=await fetch("/api/needs-material",{cache:"no-store"});
+      const data=await res.json();
+      if(!res.ok)throw new Error(data.error||"Failed to load work orders");
+      setRows((data.rows||[]).map(normalizeRow));
+      setLastRefresh(new Date().toLocaleString("en-US",{timeZone:"America/Chicago",dateStyle:"long",timeStyle:"short"}));
+      if(data.seeded)notify("Sample data seeded to Supabase once.");
+      else if(!silent)notify("Loaded work orders from Supabase.");
+      return true;
+    }catch(error){
+      console.error(error);
+      notify(error.message||"Could not load Supabase data");
+      return false;
+    }finally{
+      setLoadingRows(false);
+    }
+  }
+
+  useEffect(()=>{
+    try{
+      const u=localStorage.getItem("kannonPrototypeUsers");
+      if(u)setUsers(JSON.parse(u));
+    }catch{}
+    let cancelled=false;
+    (async()=>{
+      setLoadingRows(true);
+      try{
+        const res=await fetch("/api/needs-material",{cache:"no-store"});
+        const data=await res.json();
+        if(!res.ok)throw new Error(data.error||"Failed to load work orders");
+        if(cancelled)return;
+        setRows((data.rows||[]).map(normalizeRow));
+        setLastRefresh(new Date().toLocaleString("en-US",{timeZone:"America/Chicago",dateStyle:"long",timeStyle:"short"}));
+        if(data.seeded)notify("Sample data seeded to Supabase once.");
+      }catch(error){
+        console.error(error);
+        if(!cancelled)notify(error.message||"Could not load Supabase data");
+      }finally{
+        if(!cancelled)setLoadingRows(false);
+      }
+    })();
+    return()=>{cancelled=true};
+  },[]);
+
+  async function saveWorkOrder(updated){
+    setSavingEdit(true);
+    try{
+      const res=await fetch(`/api/needs-material/${updated.id}`,{
+        method:"PUT",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          owner:updated.owner,
+          follow_up_notes:updated.follow_up_notes,
+          material_lines:updated.material_lines||[]
+        })
+      });
+      const data=await res.json();
+      if(!res.ok)throw new Error(data.error||"Failed to save work order");
+      const saved=normalizeRow(data.row);
+      setRows(prev=>prev.map(r=>r.id===saved.id?saved:r));
+      setEdit(null);
+      notify(`${saved.work_order} saved to Supabase`);
+    }catch(error){
+      console.error(error);
+      notify(error.message||"Save failed");
+    }finally{
+      setSavingEdit(false);
+    }
+  }
 
   const activeRows=useMemo(()=>rows.filter(isActiveNeedMaterial),[rows]);
 
@@ -278,10 +343,8 @@ export default function SundayPrototype(){
           sortDir={sortDir}
           onSort={toggleSort}
           lastRefresh={lastRefresh}
-          refresh={()=>{
-            setLastRefresh(new Date().toLocaleString("en-US",{timeZone:"America/Chicago",dateStyle:"long",timeStyle:"short"}));
-            notify("SharePoint refresh simulated successfully — active Need Material orders reloaded.");
-          }}
+          loadingRows={loadingRows}
+          refresh={()=>loadRowsFromApi()}
           onEdit={row=>setEdit(normalizeRow({...row,material_lines:(row.material_lines||[]).map(l=>({...l}))}))}
         />:
         <Admin
@@ -303,12 +366,9 @@ export default function SundayPrototype(){
     </main>
     {edit&&<EditModal
       row={edit}
-      onClose={()=>setEdit(null)}
-      onSave={updated=>{
-        saveRows(rows.map(r=>r.id===updated.id?normalizeRow(updated):r));
-        setEdit(null);
-        notify(`${updated.work_order} updated`);
-      }}
+      saving={savingEdit}
+      onClose={()=>!savingEdit&&setEdit(null)}
+      onSave={saveWorkOrder}
     />}
     {invite&&<InviteModal
       onClose={()=>setInvite(false)}
@@ -324,7 +384,7 @@ function Login({onSignIn}){
       <div className="brand">KANNON MFG</div>
       <div className="hero-copy">
         <h1>Needs Material Dashboard</h1>
-        <p>Track material shortages, supplier commitments, expected arrivals, and production risk from one secure internal report.</p>
+        <p>Purchasing Work Queue</p>
         <div className="hero-points">
           <div className="hero-point"><span className="check">✓</span>Uses Kannon Microsoft 365 identities</div>
           <div className="hero-point"><span className="check">✓</span>Refreshes from the SharePoint scheduler at 10:00 AM</div>
@@ -337,7 +397,7 @@ function Login({onSignIn}){
       <div className="login-card">
         <div className="brand login-brand">KANNON MFG</div>
         <h2>Welcome back</h2>
-        <p>Use your Kannon Microsoft account to access the Needs Material dashboard.</p>
+        <p>Use your Kannon Microsoft account to access the Needs Material Dashboard.</p>
         <button className="ms-button" onClick={onSignIn}>
           <span className="ms-logo"><i/><i/><i/><i/></span>
           Sign in with Microsoft
@@ -348,17 +408,17 @@ function Login({onSignIn}){
   </div>;
 }
 
-function Dashboard({kpis,kpiFilter,setKpiFilter,search,setSearch,visibleRows,sortKey,sortDir,onSort,lastRefresh,refresh,onEdit}){
+function Dashboard({kpis,kpiFilter,setKpiFilter,search,setSearch,visibleRows,sortKey,sortDir,onSort,lastRefresh,loadingRows,refresh,onEdit}){
   return <section>
     <div className="page-head">
       <div>
         <h1>Needs Material Dashboard</h1>
-        <p>Active production orders requiring material follow-up.</p>
-        <div className="refresh-note"><span className="dot"/>Last refreshed: {lastRefresh}</div>
+        <p>Purchasing Work Queue</p>
+        <div className="refresh-note"><span className="dot"/>{loadingRows?"Loading from Supabase…":`Last loaded: ${lastRefresh}`}</div>
       </div>
       <div className="actions">
         <button className="btn" onClick={()=>window.print()}>Export</button>
-        <button className="btn primary" onClick={refresh}>Refresh Now</button>
+        <button className="btn primary" onClick={refresh} disabled={loadingRows}>Refresh Now</button>
       </div>
     </div>
 
@@ -410,7 +470,7 @@ function Dashboard({kpis,kpiFilter,setKpiFilter,search,setSearch,visibleRows,sor
             </tr>
           </thead>
           <tbody>
-            {visibleRows.length?visibleRows.map(r=>(
+            {loadingRows?<tr><td colSpan="10" className="empty">Loading work orders…</td></tr>:visibleRows.length?visibleRows.map(r=>(
               <tr key={r.id}>
                 <td className="mono">{r.work_order}</td>
                 <td className="mono">{r.customer_po||"—"}</td>
@@ -476,7 +536,7 @@ function Admin({users,onInvite,onToggle,onRemove}){
   </section>;
 }
 
-function EditModal({row,onClose,onSave}){
+function EditModal({row,onClose,onSave,saving}){
   const [v,setV]=useState(()=>normalizeRow(row));
   const lines=materialLines(v);
   const flats=lines.filter(l=>l.material_category==="Flats");
@@ -489,7 +549,7 @@ function EditModal({row,onClose,onSave}){
   };
   return <div className="modal-back">
     <div className="modal modal-wide">
-      <div className="modal-head"><h2>Edit {row.work_order}</h2><button className="x" onClick={onClose}>×</button></div>
+      <div className="modal-head"><h2>Edit {row.work_order}</h2><button className="x" onClick={onClose} disabled={saving}>×</button></div>
       <div className="modal-body">
         <div className="field readonly-field">
           <label>Customer PO</label>
@@ -497,7 +557,7 @@ function EditModal({row,onClose,onSave}){
         </div>
         <div className="field">
           <label>Owner</label>
-          <select value={v.owner} onChange={e=>setV({...v,owner:e.target.value})}>
+          <select value={v.owner} onChange={e=>setV({...v,owner:e.target.value})} disabled={saving}>
             <option>Chris Vieux</option>
             <option>Buyer 1</option>
             <option>Unassigned</option>
@@ -505,48 +565,48 @@ function EditModal({row,onClose,onSave}){
         </div>
         <div className="field">
           <label>Notes</label>
-          <textarea value={v.follow_up_notes} onChange={e=>setV({...v,follow_up_notes:e.target.value})}/>
+          <textarea value={v.follow_up_notes} onChange={e=>setV({...v,follow_up_notes:e.target.value})} disabled={saving}/>
         </div>
-        <MaterialSection title="Flats" lines={flats} onAdd={()=>addLine("Flats")} onChange={updateLine} onRemove={removeLine}/>
-        <MaterialSection title="Shapes" lines={shapes} onAdd={()=>addLine("Shapes")} onChange={updateLine} onRemove={removeLine}/>
+        <MaterialSection title="Flats" lines={flats} onAdd={()=>addLine("Flats")} onChange={updateLine} onRemove={removeLine} disabled={saving}/>
+        <MaterialSection title="Shapes" lines={shapes} onAdd={()=>addLine("Shapes")} onChange={updateLine} onRemove={removeLine} disabled={saving}/>
       </div>
       <div className="modal-foot">
-        <button className="btn" onClick={onClose}>Cancel</button>
-        <button className="btn primary" onClick={()=>onSave(v)}>Save</button>
+        <button className="btn" onClick={onClose} disabled={saving}>Cancel</button>
+        <button className="btn primary" onClick={()=>onSave(v)} disabled={saving}>{saving?"Saving…":"Save"}</button>
       </div>
     </div>
   </div>;
 }
 
-function MaterialSection({title,lines,onAdd,onChange,onRemove}){
+function MaterialSection({title,lines,onAdd,onChange,onRemove,disabled}){
   return <div className="material-section">
     <div className="material-section-head">
       <h3>{title}</h3>
-      <button type="button" className="btn" onClick={onAdd}>+ Add {title} Material</button>
+      <button type="button" className="btn" onClick={onAdd} disabled={disabled}>+ Add {title} Material</button>
     </div>
     {lines.length===0?<p className="material-empty">No {title.toLowerCase()} material lines yet.</p>:
       lines.map(line=><div className="material-line" key={line.id}>
         <div className="material-line-grid">
-          <Field label="Material Type" value={line.material_type} set={x=>onChange(line.id,{material_type:x})}/>
-          <Field label="Supplier" value={line.supplier} set={x=>onChange(line.id,{supplier:x})}/>
-          <Field label="Material PO" value={line.material_po} set={x=>onChange(line.id,{material_po:x})}/>
-          <Field label="EAD" type="date" value={line.ead} set={x=>onChange(line.id,{ead:x})}/>
+          <Field label="Material Type" value={line.material_type} set={x=>onChange(line.id,{material_type:x})} disabled={disabled}/>
+          <Field label="Supplier" value={line.supplier} set={x=>onChange(line.id,{supplier:x})} disabled={disabled}/>
+          <Field label="Material PO" value={line.material_po} set={x=>onChange(line.id,{material_po:x})} disabled={disabled}/>
+          <Field label="EAD" type="date" value={line.ead} set={x=>onChange(line.id,{ead:x})} disabled={disabled}/>
           <div className="field">
             <label>Status</label>
-            <select value={line.status||DEFAULT_MATERIAL_LINE_STATUS} onChange={e=>onChange(line.id,{status:e.target.value})}>
+            <select value={line.status||DEFAULT_MATERIAL_LINE_STATUS} onChange={e=>onChange(line.id,{status:e.target.value})} disabled={disabled}>
               {MATERIAL_LINE_STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
             </select>
           </div>
         </div>
         <div className="material-line-actions">
-          <button type="button" className="btn danger" onClick={()=>onRemove(line.id)}>Remove</button>
+          <button type="button" className="btn danger" onClick={()=>onRemove(line.id)} disabled={disabled}>Remove</button>
         </div>
       </div>)}
   </div>;
 }
 
-function Field({label,value,set,type="text"}){
-  return <div className="field"><label>{label}</label><input type={type} value={value||""} onChange={e=>set(e.target.value)}/></div>;
+function Field({label,value,set,type="text",disabled}){
+  return <div className="field"><label>{label}</label><input type={type} value={value||""} onChange={e=>set(e.target.value)} disabled={disabled}/></div>;
 }
 
 function InviteModal({onClose,onSave}){

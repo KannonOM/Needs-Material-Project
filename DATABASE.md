@@ -1,4 +1,4 @@
-# Scheduler Needs Material — Database Design
+# Needs Material Dashboard — Database Design
 
 This document describes the schema in [`supabase/migrations/001_init.sql`](supabase/migrations/001_init.sql) and seed in [`supabase/seed.sql`](supabase/seed.sql).
 
@@ -535,9 +535,13 @@ Run metadata only; refresh must not modify `material_lines`.
 
 ---
 
-## Seed data
+## Data loading (current app)
 
-Chris Vieux administrator with email placeholder `CHRIS_KANNON_EMAIL_REPLACE_ME`. No material lines seeded in SQL (prototype sample data includes demo lines locally).
+- Work orders and material lines are loaded from Supabase via `GET /api/needs-material`.
+- If `needs_material` is empty, the API seeds once from `data/sample-data.js`, then returns DB rows.
+- Edits save through `PUT /api/needs-material/[id]` and write `audit_log` entries.
+- Browser `localStorage` is no longer used for Needs Material rows (Administration users remain local until Microsoft auth).
+- Server uses `SUPABASE_URL` + `SUPABASE_SECRET_KEY` only (never in client bundles).
 
 ---
 

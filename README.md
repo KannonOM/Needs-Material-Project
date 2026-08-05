@@ -1,35 +1,34 @@
-# Kannon Needs Material Dashboard
+# Needs Material Dashboard
 
-This repository is the runnable application baseline that exactly preserves the Sunday prototype UI.
+Purchasing Work Queue for Kannon Manufacturing.
+
+This repository is the runnable application baseline that preserves the Sunday prototype visual language and the approved Version 1 dashboard behavior.
 
 ## What works now
 
 - Microsoft-style login screen (local baseline login)
 - Dashboard navigation
-- Search and filters
-- Summary cards
-- Due-date and risk charts
-- 21 sample Needs Material records from the uploaded workbook
-- Editable purchasing fields
-- Browser persistence through localStorage
-- Administration screen
-- User invitation, disable, enable, and remove actions
-- Refresh simulation
+- Search and sortable columns
+- KPI summary cards
+- Sticky-header Needs Material work queue table
+- Flats / Shapes material lines in the edit dialog
+- Supabase-backed work orders and material lines (when configured)
+- Administration screen (local baseline users)
+- Refresh reload from Supabase
 - Printable/exportable dashboard view
 
-## What Cursor should replace without redesigning
+## What remains for production wiring
 
 - Local login -> Microsoft Entra ID authentication
-- Sample rows -> live SharePoint workbook import
-- localStorage -> shared database
-- simulated refresh -> Microsoft Graph refresh
-- queued invitation -> real invitation email/allowlist entry
+- Sample/SharePoint seed path -> live SharePoint workbook import
+- Simulated SharePoint refresh -> Microsoft Graph refresh
+- Queued invitation -> real invitation email/allowlist entry
 
-Read `PROJECT.md` before changing code. The visible UI is the exact baseline and must not be redesigned.
+Read `PROJECT.md` before changing code. Do not redesign the approved Version 1 UI.
 
 ## Database (Supabase)
 
-Phase 3 schema lives in `supabase/migrations/001_init.sql` with a safe admin seed in `supabase/seed.sql`. Setup steps: [docs/supabase.md](docs/supabase.md). The app UI still uses local sample data until later phases.
+Schema lives in `supabase/migrations/001_init.sql` with an admin seed in `supabase/seed.sql`. Setup steps: [docs/supabase.md](docs/supabase.md).
 
 ## Run locally
 
@@ -42,6 +41,6 @@ Open `http://localhost:3000`.
 
 ## Static reference
 
-The exact original browser prototype is preserved at:
+The original browser prototype is preserved at:
 
 `public/sunday-prototype.html`
