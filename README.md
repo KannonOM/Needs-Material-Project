@@ -8,29 +8,40 @@ This repository is the runnable application baseline that preserves the Sunday p
 
 ## What works now
 
-- Microsoft-style login screen (local baseline login)
+- Microsoft Entra ID (Microsoft 365) sign-in via Auth.js
+- Allowlist gate against `public.allowed_users` (`status = active` only)
+- Role-based access: administrator, purchasing, scheduler, viewer
 - Dashboard navigation
 - Search and sortable columns
 - KPI summary cards
 - Sticky-header Needs Material work queue table
 - Flats / Shapes material lines in the edit dialog
 - Supabase-backed work orders and material lines (when configured)
-- Administration screen (local baseline users)
-- Refresh reload from Supabase
+- Administration screen (Supabase allowlist; invite email delivery later)
+- Refresh Now for administrator / scheduler (Microsoft Graph SharePoint import)
+- Dynamic Source filename from the live workbook
 - Printable/exportable dashboard view
 
 ## What remains for production wiring
 
-- Local login -> Microsoft Entra ID authentication
-- Sample/SharePoint seed path -> live SharePoint workbook import
-- Simulated SharePoint refresh -> Microsoft Graph refresh
-- Queued invitation -> real invitation email/allowlist entry
+- Daily 10:00 AM America/Chicago scheduled refresh
+- Invitation email delivery (allowlist insert already works)
 
 Read `PROJECT.md` before changing code. Do not redesign the approved Version 1 UI.
 
+## Authentication
+
+Setup guide: [docs/microsoft-entra.md](docs/microsoft-entra.md)
+
+Required local redirect URI:
+
+`http://localhost:3000/api/auth/callback/microsoft-entra-id`
+
 ## Database (Supabase)
 
-Schema lives in `supabase/migrations/001_init.sql` with an admin seed in `supabase/seed.sql`. Setup steps: [docs/supabase.md](docs/supabase.md).
+Schema lives in `supabase/migrations/` with an admin seed in `supabase/seed.sql`. Setup steps: [docs/supabase.md](docs/supabase.md).
+
+SharePoint import setup: [docs/sharepoint.md](docs/sharepoint.md).
 
 ## Run locally
 

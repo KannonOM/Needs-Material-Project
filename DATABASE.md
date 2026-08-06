@@ -2,7 +2,7 @@
 
 This document describes the schema in [`supabase/migrations/001_init.sql`](supabase/migrations/001_init.sql) and seed in [`supabase/seed.sql`](supabase/seed.sql).
 
-**Status:** Schema + prototype edit dialog support parent/child material lines. The app still uses local sample data / `localStorage` (no live Supabase or SharePoint yet).
+**Status:** Schema live in Supabase. App uses Microsoft Entra + `allowed_users` for auth, Supabase for storage, and Microsoft Graph for SharePoint workbook import (`POST /api/refresh`).
 
 **Source of truth for business rules:** [`PROJECT.md`](PROJECT.md)
 
@@ -15,7 +15,7 @@ This document describes the schema in [`supabase/migrations/001_init.sql`](supab
 3. **Material lines (children)** hold Flats/Shapes purchasing detail (zero or more per work order).
 4. SharePoint refresh updates scheduler parent fields only; it never touches material lines, owner, or notes.
 5. Rows that leave `Need Material` are archived (`active = false`), never deleted.
-6. RLS is enabled with no public policies; server uses service role until Microsoft auth (Phase 4).
+6. RLS is enabled with no public policies; the Next.js server uses the Supabase service role after Microsoft Entra authentication and allowlist checks.
 
 ---
 
@@ -137,7 +137,7 @@ Dashboard allowlist and role assignment. Microsoft-authenticated users must also
 | Column | Data type | Nullable | Default | Constraints / notes |
 |---|---|---|---|---|
 | `id` | `uuid` | NO | `gen_random_uuid()` | Primary key |
-| `email` | `text` | NO | — | `UNIQUE`; email format check |
+| `email` | `text` | NO | — | `UNIQUE`; stored trimmed + lowercase; case-insensitive match; format check |
 | `full_name` | `text` | NO | — | Display name |
 | `role` | `text` | NO | — | `administrator`, `purchasing`, `scheduler`, `viewer` |
 | `status` | `text` | NO | `'pending'` | `active`, `pending`, `disabled` |
@@ -157,6 +157,8 @@ Dashboard allowlist and role assignment. Microsoft-authenticated users must also
 
 - PK `id`
 - Unique `email`
+- Unique `lower(email)` (`allowed_users_email_lower_uidx`, migration `002`)
+- Check `email = lower(btrim(email))`
 - `role`, `status`
 
 ## SharePoint / dashboard
@@ -467,10 +469,15 @@ Records each SharePoint refresh (manual or scheduled).
 | `started_at` | `timestamptz` | NO | `timezone('utc', now())` | |
 | `completed_at` | `timestamptz` | YES | — | |
 | `status` | `text` | NO | `'running'` | `running`, `success`, `failed` |
-| `rows_read` | `integer` | NO | `0` | |
-| `rows_created` | `integer` | NO | `0` | Parent rows |
-| `rows_updated` | `integer` | NO | `0` | Parent rows |
+| `rows_read` | `integer` | NO | `0` | Rows inspected |
+| `rows_matching` | `integer` | NO | `0` | Need Material rows (migration `003`) |
+| `distinct_work_orders` | `integer` | NO | `0` | Distinct WO values (migration `003`) |
+| `rows_created` | `integer` | NO | `0` | Parent rows inserted |
+| `rows_updated` | `integer` | NO | `0` | Parent rows updated |
 | `rows_archived` | `integer` | NO | `0` | Parent rows set inactive |
+| `rows_failed` | `integer` | NO | `0` | Validation failures (migration `003`) |
+| `source_filename` | `text` | YES | — | Workbook name from Graph (migration `003`) |
+| `diagnostics` | `jsonb` | YES | — | Blank/duplicate WO, missing columns, etc. |
 | `error_message` | `text` | YES | — | |
 | `triggered_by` | `uuid` | YES | — | FK → `allowed_users` |
 
@@ -512,7 +519,7 @@ Run metadata only; refresh must not modify `material_lines`.
 | `audit_log` | Yes | Yes | None |
 | `refresh_history` | Yes | Yes | None |
 
-`anon` / `authenticated` privileges revoked when those roles exist. Finalize role policies after Microsoft auth.
+`anon` / `authenticated` privileges revoked when those roles exist. Authorization is enforced in Next.js API routes after Entra + allowlist checks; the service role remains server-only.
 
 ---
 
@@ -530,8 +537,8 @@ Run metadata only; refresh must not modify `material_lines`.
 | Edit dialog | Owner + Notes; Flats/Shapes sections; line fields Material Type, Supplier, Material PO, EAD, Status |
 | `+ Add Flats/Shapes Material` | Append child line; status defaults to `Not Ordered` |
 | Remove | Confirm, then remove line |
-| Save | Persists parent + `material_lines` to localStorage until Supabase wiring |
-| localStorage normalize | Missing line `status` → `Not Ordered`; legacy header status mapped when present |
+| Save | Persists parent + `material_lines` via authenticated `PUT /api/needs-material/[id]` |
+| Normalize | Missing line `status` → `Not Ordered`; legacy header status mapped when present |
 
 ---
 
@@ -540,7 +547,8 @@ Run metadata only; refresh must not modify `material_lines`.
 - Work orders and material lines are loaded from Supabase via `GET /api/needs-material`.
 - If `needs_material` is empty, the API seeds once from `data/sample-data.js`, then returns DB rows.
 - Edits save through `PUT /api/needs-material/[id]` and write `audit_log` entries.
-- Browser `localStorage` is no longer used for Needs Material rows (Administration users remain local until Microsoft auth).
+- Browser `localStorage` is not used for Needs Material rows or allowlist users.
+- Microsoft Entra sign-in + `allowed_users` gate access; roles are enforced server-side on API routes.
 - Server uses `SUPABASE_URL` + `SUPABASE_SECRET_KEY` only (never in client bundles).
 
 ---

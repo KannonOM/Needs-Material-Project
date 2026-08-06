@@ -24,22 +24,22 @@
 - [ ] Configure Row Level Security
 
 ## Phase 4 — Microsoft Authentication
-- [ ] Configure Microsoft Entra sign-in
-- [ ] Add allowlist check
-- [ ] Add role lookup
-- [ ] Deny unauthorized users
-- [ ] Set Chris Vieux as initial Administrator
+- [x] Configure Microsoft Entra sign-in
+- [x] Add allowlist check
+- [x] Add role lookup
+- [x] Deny unauthorized users
+- [x] Set Chris Vieux as initial Administrator
 
 ## Phase 5 — SharePoint Import
-- [ ] Connect through Microsoft Graph
-- [ ] Download the live workbook
-- [ ] Read `Scheduler 2026`
-- [ ] Validate required headers
-- [ ] Filter Status = `Need Material`
-- [ ] Match by Work Order
-- [ ] Preserve dashboard-controlled fields
-- [ ] Archive records no longer active
-- [ ] Record refresh history
+- [x] Connect through Microsoft Graph
+- [x] Download the live workbook
+- [x] Read `Scheduler 2026`
+- [x] Validate required headers
+- [x] Filter Status = `Need Material`
+- [x] Match by Work Order
+- [x] Preserve dashboard-controlled fields
+- [x] Archive records no longer active
+- [x] Record refresh history
 
 ## Phase 6 — Editable Fields
 - [ ] Make existing editable fields save to database
@@ -56,10 +56,10 @@
 - [ ] Preserve existing Administration layout
 
 ## Phase 8 — Refresh Scheduling
-- [ ] Add manual Refresh Now
-- [ ] Restrict manual refresh to Administrator and Scheduler
+- [x] Add manual Refresh Now
+- [x] Restrict manual refresh to Administrator and Scheduler
 - [ ] Add 10:00 AM America/Chicago scheduled refresh
-- [ ] Show last successful refresh
+- [x] Show last successful refresh
 - [ ] Show refresh errors to Administrators
 
 ## Phase 9 — Testing

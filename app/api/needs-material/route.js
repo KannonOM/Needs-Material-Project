@@ -1,10 +1,7 @@
-import { sampleRows } from "../../../data/sample-data";
+import { requireViewer } from "../../../lib/auth/api";
 import { getSupabaseAdmin } from "../../../lib/supabase/server";
-import {
-  lineForUpsert,
-  mapRowFromDb,
-  parentForInsert,
-} from "../../../lib/needs-material/map";
+import { mapRowFromDb } from "../../../lib/needs-material/map";
+import { getLatestRefreshMeta } from "../../../lib/sharepoint/refresh";
 
 export const dynamic = "force-dynamic";
 
@@ -35,49 +32,44 @@ async function loadAllRows(supabase) {
   );
 }
 
-async function seedFromSample(supabase) {
-  for (const sample of sampleRows) {
-    const { data: parent, error: parentError } = await supabase
-      .from("needs_material")
-      .insert(parentForInsert(sample))
-      .select("*")
-      .single();
-
-    if (parentError) throw parentError;
-
-    const lines = Array.isArray(sample.material_lines)
-      ? sample.material_lines
-      : [];
-
-    if (lines.length) {
-      const payloads = lines.map((line, index) =>
-        lineForUpsert(line, parent.id, index)
-      );
-      const { error: lineError } = await supabase
-        .from("material_lines")
-        .insert(payloads);
-      if (lineError) throw lineError;
-    }
-  }
-}
-
 export async function GET() {
+  const { error: authError } = await requireViewer();
+  if (authError) return authError;
+
   try {
     const supabase = getSupabaseAdmin();
-    const { count, error: countError } = await supabase
-      .from("needs_material")
-      .select("id", { count: "exact", head: true });
+    // Automatic sample seeding is disabled — live SharePoint import owns data.
+    const rows = await loadAllRows(supabase);
+    const latestRefresh = await getLatestRefreshMeta(supabase);
 
-    if (countError) throw countError;
-
-    let seeded = false;
-    if ((count || 0) === 0) {
-      await seedFromSample(supabase);
-      seeded = true;
+    const startedAt = latestRefresh?.started_at || null;
+    const completedAt = latestRefresh?.completed_at || null;
+    let durationMs = null;
+    if (startedAt && completedAt) {
+      const ms = new Date(completedAt).getTime() - new Date(startedAt).getTime();
+      if (Number.isFinite(ms) && ms >= 0) durationMs = ms;
     }
 
-    const rows = await loadAllRows(supabase);
-    return Response.json({ rows, seeded, source: "supabase" });
+    return Response.json({
+      rows,
+      seeded: false,
+      source: "supabase",
+      sourceFilename:
+        latestRefresh?.source_filename || "Production Scheduler - 2026.xlsx",
+      lastRefreshAt: completedAt || startedAt || null,
+      lastRefreshStatus: latestRefresh?.status || null,
+      // Stats already loaded by getLatestRefreshMeta — exposed for UI only.
+      refreshStats: latestRefresh
+        ? {
+            inserted: latestRefresh.rows_created ?? null,
+            updated: latestRefresh.rows_updated ?? null,
+            archived: latestRefresh.rows_archived ?? null,
+            activeDashboardCount: null,
+            durationMs,
+            errorMessage: latestRefresh.error_message || null,
+          }
+        : null,
+    });
   } catch (error) {
     console.error("GET /api/needs-material failed", error);
     return Response.json(

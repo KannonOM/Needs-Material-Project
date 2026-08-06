@@ -1,11 +1,20 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-
-const seedUsers=[
-  {name:"Chris Vieux",email:"cvieux@kannonmfg.com",role:"Administrator",status:"Active",last:"Today"},
-  {name:"Demo Buyer",email:"buyer@kannonmfg.com",role:"Purchasing",status:"Active",last:"Yesterday"},
-  {name:"Demo Manager",email:"manager@kannonmfg.com",role:"Viewer",status:"Pending",last:"Never"}
-];
+import { signIn, signOut, useSession } from "next-auth/react";
+import {
+  canEditPurchasingFields,
+  canManageUsers,
+  canManualRefresh,
+  displayRole,
+  initialsFromName,
+  normalizeRole
+} from "../lib/auth/permissions";
+import AppHeader from "../components/dashboard/AppHeader";
+import MetricCard from "../components/dashboard/MetricCard";
+import RefreshStatusPanel, { RUNNING_STEPS } from "../components/dashboard/RefreshStatusPanel";
+import ActiveOrdersBar from "../components/dashboard/ActiveOrdersBar";
+import SearchFilters from "../components/dashboard/SearchFilters";
+import WorkOrderTable from "../components/dashboard/WorkOrderTable";
 
 const MATERIAL_LINE_STATUSES=[
   "Not Ordered",
@@ -171,13 +180,58 @@ function compareValues(a,b,key){
   return av.localeCompare(bv,undefined,{numeric:true,sensitivity:"base"});
 }
 
+function formatDurationMs(ms){
+  if(ms==null||!Number.isFinite(ms)||ms<0)return null;
+  if(ms<1000)return`${Math.round(ms)}ms`;
+  const sec=Math.round(ms/1000);
+  if(sec<60)return`${sec}s`;
+  const m=Math.floor(sec/60);
+  const s=sec%60;
+  return`${m}m ${s}s`;
+}
+
+function mapRefreshStatus(status){
+  const value=String(status||"").toLowerCase();
+  if(value==="success"||value==="completed"||value==="ok")return"success";
+  if(value==="failed"||value==="error")return"failed";
+  return"idle";
+}
+
+function parseRefreshMeta(data){
+  const stats=data.refreshStats||null;
+  return{
+    sourceFilename:data.sourceFilename||null,
+    lastRefreshLabel:data.lastRefreshAt
+      ? new Date(data.lastRefreshAt).toLocaleString("en-US",{timeZone:"America/Chicago",dateStyle:"long",timeStyle:"short"})
+      :"Not loaded yet",
+    status:data.lastRefreshStatus!=null?mapRefreshStatus(data.lastRefreshStatus):null,
+    stats:stats?{
+      inserted:stats.inserted,
+      updated:stats.updated,
+      archived:stats.archived,
+      activeDashboardCount:stats.activeDashboardCount
+    }:null,
+    durationLabel:stats?formatDurationMs(stats.durationMs):null,
+    errorMessage:stats?.errorMessage||""
+  };
+}
+
 export default function SundayPrototype(){
-  const [signedIn,setSignedIn]=useState(false);
+  const {data:session,status:sessionStatus}=useSession();
+  const signedIn=Boolean(session?.user?.email&&session?.user?.role);
+  const role=normalizeRole(session?.user?.role);
+  const canEdit=canEditPurchasingFields(role);
+  const canAdmin=canManageUsers(role);
+  const canRefresh=canManualRefresh(role);
+  const userName=session?.user?.name||session?.user?.email||"";
+  const userRoleLabel=displayRole(role);
+
   const [page,setPage]=useState("dashboard");
   const [rows,setRows]=useState([]);
-  const [loadingRows,setLoadingRows]=useState(true);
+  const [loadingRows,setLoadingRows]=useState(false);
   const [savingEdit,setSavingEdit]=useState(false);
-  const [users,setUsers]=useState(seedUsers);
+  const [users,setUsers]=useState([]);
+  const [loadingUsers,setLoadingUsers]=useState(false);
   const [search,setSearch]=useState("");
   const [kpiFilter,setKpiFilter]=useState("all");
   const [sortKey,setSortKey]=useState("due_date");
@@ -186,35 +240,98 @@ export default function SundayPrototype(){
   const [invite,setInvite]=useState(false);
   const [toast,setToast]=useState("");
   const [lastRefresh,setLastRefresh]=useState("Not loaded yet");
+  const [sourceFilename,setSourceFilename]=useState("Production Scheduler - 2026.xlsx");
+  const [refreshing,setRefreshing]=useState(false);
+  const [refreshStatus,setRefreshStatus]=useState("idle");
+  const [refreshStats,setRefreshStats]=useState(null);
+  const [refreshDurationLabel,setRefreshDurationLabel]=useState(null);
+  const [refreshError,setRefreshError]=useState("");
+  const [runningStepIndex,setRunningStepIndex]=useState(0);
 
   const notify=msg=>{setToast(msg);setTimeout(()=>setToast(""),3200)};
-  const saveUsers=next=>{setUsers(next);localStorage.setItem("kannonPrototypeUsers",JSON.stringify(next));};
+
+  function formatRefreshTime(iso){
+    if(!iso)return "Not loaded yet";
+    return new Date(iso).toLocaleString("en-US",{timeZone:"America/Chicago",dateStyle:"long",timeStyle:"short"});
+  }
+
+  function applyParsedRefreshMeta(meta){
+    if(meta.sourceFilename)setSourceFilename(meta.sourceFilename);
+    setLastRefresh(meta.lastRefreshLabel);
+    if(meta.status!=null)setRefreshStatus(meta.status);
+    if(meta.stats){
+      setRefreshStats(meta.stats);
+      setRefreshDurationLabel(meta.durationLabel);
+      setRefreshError(meta.errorMessage||"");
+    }
+  }
 
   async function loadRowsFromApi({silent=false}={}){
     if(!silent)setLoadingRows(true);
     try{
       const res=await fetch("/api/needs-material",{cache:"no-store"});
       const data=await res.json();
+      if(res.status===401){
+        await signOut({callbackUrl:"/"});
+        throw new Error("Session expired. Sign in again.");
+      }
       if(!res.ok)throw new Error(data.error||"Failed to load work orders");
       setRows((data.rows||[]).map(normalizeRow));
-      setLastRefresh(new Date().toLocaleString("en-US",{timeZone:"America/Chicago",dateStyle:"long",timeStyle:"short"}));
-      if(data.seeded)notify("Sample data seeded to Supabase once.");
-      else if(!silent)notify("Loaded work orders from Supabase.");
+      applyParsedRefreshMeta(parseRefreshMeta(data));
+      if(!silent)notify("Loaded work orders from Supabase.");
       return true;
     }catch(error){
       console.error(error);
-      notify(error.message||"Could not load Supabase data");
+      notify(error.message||"Could not load work orders");
       return false;
     }finally{
       setLoadingRows(false);
     }
   }
 
-  useEffect(()=>{
+  async function refreshFromSharePoint(){
+    if(refreshing)return;
+    setRefreshing(true);
+    setRefreshError("");
+    setRunningStepIndex(0);
+    const started=Date.now();
+    setLoadingRows(true);
     try{
-      const u=localStorage.getItem("kannonPrototypeUsers");
-      if(u)setUsers(JSON.parse(u));
-    }catch{}
+      const res=await fetch("/api/refresh",{method:"POST"});
+      const data=await res.json();
+      if(res.status===401){
+        await signOut({callbackUrl:"/"});
+        throw new Error("Session expired. Sign in again.");
+      }
+      if(!res.ok||!data.ok)throw new Error(data.error||"SharePoint refresh failed");
+      if(data.sourceFilename)setSourceFilename(data.sourceFilename);
+      if(data.lastRefreshAt)setLastRefresh(formatRefreshTime(data.lastRefreshAt));
+      const stats=data.stats||{};
+      setRefreshStats({
+        inserted:stats.inserted??0,
+        updated:stats.updated??0,
+        archived:stats.archived??0,
+        activeDashboardCount:stats.activeDashboardCount??null
+      });
+      setRefreshDurationLabel(formatDurationMs(Date.now()-started));
+      setRefreshStatus("success");
+      notify(`Refresh complete: ${stats.distinctWorkOrders??0} WO, ${stats.inserted??0} new, ${stats.updated??0} updated, ${stats.archived??0} archived`);
+      await loadRowsFromApi({silent:true});
+    }catch(error){
+      console.error(error);
+      const message=error.message||"SharePoint refresh failed";
+      setRefreshStatus("failed");
+      setRefreshError(message);
+      setRefreshDurationLabel(formatDurationMs(Date.now()-started));
+      notify(message);
+      setLoadingRows(false);
+    }finally{
+      setRefreshing(false);
+    }
+  }
+
+  useEffect(()=>{
+    if(!signedIn)return;
     let cancelled=false;
     (async()=>{
       setLoadingRows(true);
@@ -224,19 +341,66 @@ export default function SundayPrototype(){
         if(!res.ok)throw new Error(data.error||"Failed to load work orders");
         if(cancelled)return;
         setRows((data.rows||[]).map(normalizeRow));
-        setLastRefresh(new Date().toLocaleString("en-US",{timeZone:"America/Chicago",dateStyle:"long",timeStyle:"short"}));
-        if(data.seeded)notify("Sample data seeded to Supabase once.");
+        const meta=parseRefreshMeta(data);
+        if(meta.sourceFilename)setSourceFilename(meta.sourceFilename);
+        setLastRefresh(meta.lastRefreshLabel);
+        if(meta.status!=null)setRefreshStatus(meta.status);
+        if(meta.stats){
+          setRefreshStats(meta.stats);
+          setRefreshDurationLabel(meta.durationLabel);
+          setRefreshError(meta.errorMessage||"");
+        }
       }catch(error){
         console.error(error);
-        if(!cancelled)notify(error.message||"Could not load Supabase data");
+        if(!cancelled)notify(error.message||"Could not load work orders");
       }finally{
         if(!cancelled)setLoadingRows(false);
       }
     })();
     return()=>{cancelled=true};
-  },[]);
+  },[signedIn]);
+
+  useEffect(()=>{
+    if(!refreshing){
+      setRunningStepIndex(0);
+      return;
+    }
+    setRunningStepIndex(0);
+    const id=setInterval(()=>{
+      setRunningStepIndex(i=>Math.min(i+1,RUNNING_STEPS.length-1));
+    },1400);
+    return()=>clearInterval(id);
+  },[refreshing]);
+
+  useEffect(()=>{
+    if(!(signedIn&&canAdmin&&page==="admin"))return;
+    let cancelled=false;
+    (async()=>{
+      setLoadingUsers(true);
+      try{
+        const res=await fetch("/api/allowed-users",{cache:"no-store"});
+        const data=await res.json();
+        if(!res.ok)throw new Error(data.error||"Failed to load users");
+        if(!cancelled)setUsers(data.users||[]);
+      }catch(error){
+        console.error(error);
+        if(!cancelled)notify(error.message||"Could not load allowlist users");
+      }finally{
+        if(!cancelled)setLoadingUsers(false);
+      }
+    })();
+    return()=>{cancelled=true};
+  },[signedIn,canAdmin,page]);
+
+  useEffect(()=>{
+    if(!canAdmin&&page==="admin")setPage("dashboard");
+  },[canAdmin,page]);
 
   async function saveWorkOrder(updated){
+    if(!canEdit){
+      notify("Your role is read-only.");
+      return;
+    }
     setSavingEdit(true);
     try{
       const res=await fetch(`/api/needs-material/${updated.id}`,{
@@ -249,6 +413,10 @@ export default function SundayPrototype(){
         })
       });
       const data=await res.json();
+      if(res.status===401){
+        await signOut({callbackUrl:"/"});
+        throw new Error("Session expired. Sign in again.");
+      }
       if(!res.ok)throw new Error(data.error||"Failed to save work order");
       const saved=normalizeRow(data.row);
       setRows(prev=>prev.map(r=>r.id===saved.id?saved:r));
@@ -259,6 +427,57 @@ export default function SundayPrototype(){
       notify(error.message||"Save failed");
     }finally{
       setSavingEdit(false);
+    }
+  }
+
+  async function inviteUser(payload){
+    try{
+      const res=await fetch("/api/allowed-users",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(payload)
+      });
+      const data=await res.json();
+      if(!res.ok)throw new Error(data.error||"Invite failed");
+      setUsers(prev=>[...prev,data.user].sort((a,b)=>a.name.localeCompare(b.name)));
+      setInvite(false);
+      notify(data.note||`Invitation queued for ${data.user.email}`);
+    }catch(error){
+      console.error(error);
+      notify(error.message||"Invite failed");
+    }
+  }
+
+  async function toggleUserStatus(user){
+    const current=String(user.statusKey||user.status).toLowerCase();
+    const nextStatus=current==="active"?"disabled":"active";
+    try{
+      const res=await fetch(`/api/allowed-users/${user.id}`,{
+        method:"PATCH",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({status:nextStatus})
+      });
+      const data=await res.json();
+      if(!res.ok)throw new Error(data.error||"Update failed");
+      setUsers(prev=>prev.map(u=>u.id===data.user.id?data.user:u));
+      notify(`${data.user.name} is now ${data.user.status}`);
+    }catch(error){
+      console.error(error);
+      notify(error.message||"Update failed");
+    }
+  }
+
+  async function removeUser(user){
+    if(user.email==="cvieux@kannonmfg.com")return notify("The primary administrator cannot be removed.");
+    try{
+      const res=await fetch(`/api/allowed-users/${user.id}`,{method:"DELETE"});
+      const data=await res.json();
+      if(!res.ok)throw new Error(data.error||"Remove failed");
+      setUsers(prev=>prev.filter(u=>u.id!==user.id));
+      notify("User removed");
+    }catch(error){
+      console.error(error);
+      notify(error.message||"Remove failed");
     }
   }
 
@@ -315,21 +534,33 @@ export default function SundayPrototype(){
     else{setSortKey(key);setSortDir(key==="due_date"?"asc":"asc");}
   };
 
-  if(!signedIn)return <Login onSignIn={()=>setSignedIn(true)}/>;
+  if(sessionStatus==="loading"){
+    return <div className="login"><section className="login-panel"><div className="login-card"><h2>Checking session…</h2></div></section></div>;
+  }
+
+  if(!signedIn)return <Login onSignIn={()=>signIn("microsoft-entra-id")}/>;
+
+  const panelActiveCount=
+    refreshStats?.activeDashboardCount!=null
+      ? refreshStats.activeDashboardCount
+      : activeRows.length;
 
   return <div className="shell">
-    <header className="topbar">
-      <div className="brand">KANNON MFG</div>
-      <nav className="nav">
-        <button className={page==="dashboard"?"active":""} onClick={()=>setPage("dashboard")}>Dashboard</button>
-        <button className={page==="admin"?"active":""} onClick={()=>setPage("admin")}>Administration</button>
-      </nav>
-      <div className="top-actions">
-        <div className="avatar">CV</div>
-        <div className="user-menu"><b>Chris Vieux</b><span>Administrator</span></div>
-        <button className="btn top-signout" onClick={()=>setSignedIn(false)}>Sign out</button>
-      </div>
-    </header>
+    <AppHeader
+      page={page}
+      setPage={setPage}
+      canAdmin={canAdmin}
+      userName={userName}
+      userRoleLabel={userRoleLabel}
+      initials={initialsFromName(userName)}
+      onSignOut={()=>signOut({callbackUrl:"/"})}
+      onRefreshHistory={()=>{
+        setPage("dashboard");
+        requestAnimationFrame(()=>{
+          document.getElementById("refresh-panel")?.scrollIntoView({behavior:"smooth",block:"start"});
+        });
+      }}
+    />
     <main className="content">
       {page==="dashboard"?
         <Dashboard
@@ -339,40 +570,44 @@ export default function SundayPrototype(){
           search={search}
           setSearch={setSearch}
           visibleRows={visibleRows}
+          activeCount={activeRows.length}
           sortKey={sortKey}
           sortDir={sortDir}
           onSort={toggleSort}
           lastRefresh={lastRefresh}
-          loadingRows={loadingRows}
-          refresh={()=>loadRowsFromApi()}
+          sourceFilename={sourceFilename}
+          loadingRows={loadingRows||refreshing}
+          refreshing={refreshing}
+          refreshStatus={refreshStatus}
+          refreshStats={refreshStats}
+          refreshDurationLabel={refreshDurationLabel}
+          refreshError={refreshError}
+          runningStepIndex={runningStepIndex}
+          panelActiveCount={panelActiveCount}
+          canEdit={canEdit}
+          canRefresh={canRefresh}
+          refresh={refreshFromSharePoint}
           onEdit={row=>setEdit(normalizeRow({...row,material_lines:(row.material_lines||[]).map(l=>({...l}))}))}
         />:
         <Admin
           users={users}
+          loading={loadingUsers}
           onInvite={()=>setInvite(true)}
-          onToggle={i=>{
-            const n=[...users];
-            n[i]={...n[i],status:n[i].status==="Disabled"?"Active":"Disabled"};
-            saveUsers(n);
-            notify(`${n[i].name} is now ${n[i].status}`);
-          }}
-          onRemove={i=>{
-            if(users[i].email==="cvieux@kannonmfg.com")return notify("The primary administrator cannot be removed.");
-            saveUsers(users.filter((_,x)=>x!==i));
-            notify("User removed");
-          }}
+          onToggle={toggleUserStatus}
+          onRemove={removeUser}
         />
       }
     </main>
     {edit&&<EditModal
       row={edit}
       saving={savingEdit}
+      readOnly={!canEdit}
       onClose={()=>!savingEdit&&setEdit(null)}
       onSave={saveWorkOrder}
     />}
-    {invite&&<InviteModal
+    {invite&&canAdmin&&<InviteModal
       onClose={()=>setInvite(false)}
-      onSave={u=>{saveUsers([...users,u]);setInvite(false);notify(`Invitation queued for ${u.email}`);}}
+      onSave={inviteUser}
     />}
     {toast&&<div className="toast">{toast}</div>}
   </div>;
@@ -391,7 +626,7 @@ function Login({onSignIn}){
           <div className="hero-point"><span className="check">✓</span>Role-controlled access and audit history</div>
         </div>
       </div>
-      <small>Baseline application — production credentials are not configured yet.</small>
+      <small>Sign in with your Kannon Microsoft 365 account. Access requires an active allowlist entry.</small>
     </section>
     <section className="login-panel">
       <div className="login-card">
@@ -402,99 +637,90 @@ function Login({onSignIn}){
           <span className="ms-logo"><i/><i/><i/><i/></span>
           Sign in with Microsoft
         </button>
-        <div className="demo-note"><b>Baseline mode:</b> This button signs you in locally as Chris Vieux, Administrator. Cursor will replace this authentication without changing the screen.</div>
+        <div className="demo-note"><b>Microsoft 365:</b> After Entra sign-in, access is granted only when your email is Active in the dashboard allowlist.</div>
       </div>
     </section>
   </div>;
 }
 
-function Dashboard({kpis,kpiFilter,setKpiFilter,search,setSearch,visibleRows,sortKey,sortDir,onSort,lastRefresh,loadingRows,refresh,onEdit}){
-  return <section>
-    <div className="page-head">
-      <div>
-        <h1>Needs Material Dashboard</h1>
-        <p>Purchasing Work Queue</p>
-        <div className="header-meta">
-          <div className="refresh-note"><span className="dot"/>Last Refresh: {loadingRows?"Loading…":lastRefresh}</div>
-          <div className="source-note">Source: Production Scheduler - 2026.xlsx</div>
-        </div>
-      </div>
-      <div className="actions">
-        <button className="btn" onClick={()=>window.print()}>Export</button>
-        <button className="btn primary" onClick={refresh} disabled={loadingRows}>Refresh Now</button>
-      </div>
-    </div>
-
-    <div className="filters filters-search">
-      <input
-        className="control"
-        placeholder="Search WO, customer PO, customer, part, material, owner, or notes"
-        value={search}
-        onChange={e=>setSearch(e.target.value)}
-      />
-      {kpiFilter!=="all"&&(
-        <button type="button" className="btn" onClick={()=>setKpiFilter("all")}>Clear KPI filter</button>
-      )}
-    </div>
-
-    <div className="cards cards-5">
+function Dashboard({
+  kpis,
+  kpiFilter,
+  setKpiFilter,
+  search,
+  setSearch,
+  visibleRows,
+  activeCount,
+  sortKey,
+  sortDir,
+  onSort,
+  lastRefresh,
+  sourceFilename,
+  loadingRows,
+  refreshing,
+  refreshStatus,
+  refreshStats,
+  refreshDurationLabel,
+  refreshError,
+  runningStepIndex,
+  panelActiveCount,
+  refresh,
+  onEdit,
+  canEdit,
+  canRefresh
+}){
+  return <section className="dashboard-stack">
+    <div className="metric-cards">
       {kpis.map(card=>(
-        <button
-          type="button"
-          className={`card card-button${kpiFilter===card.id?" active":""}`}
+        <MetricCard
           key={card.id}
+          label={card.label}
+          value={loadingRows&&!refreshing?"…":card.value}
+          hint={card.hint}
+          active={kpiFilter===card.id}
           onClick={()=>setKpiFilter(prev=>prev===card.id?"all":card.id)}
-        >
-          <label>{card.label}</label>
-          <strong>{card.value}</strong>
-          <small>{card.hint}</small>
-        </button>
+        />
       ))}
     </div>
 
-    <div className="panel table-panel">
-      <div className="panel-head">
-        <h2>Active Needs Material</h2>
-        <span>{visibleRows.length} records shown</span>
-      </div>
-      <div className="tablewrap tablewrap-scroll">
-        <table className="table">
-          <thead>
-            <tr>
-              {TABLE_COLUMNS.map(col=>(
-                <th key={col.key}>
-                  <button type="button" className="th-sort" onClick={()=>onSort(col.key)}>
-                    {col.label}
-                    <span className="sort-indicator">{sortKey===col.key?(sortDir==="asc"?"▲":"▼"):""}</span>
-                  </button>
-                </th>
-              ))}
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {loadingRows?<tr><td colSpan="10" className="empty">Loading work orders…</td></tr>:visibleRows.length?visibleRows.map(r=>(
-              <tr key={r.id}>
-                <td className="mono">{r.work_order}</td>
-                <td className="mono">{r.customer_po||"—"}</td>
-                <td>{r.customer}</td>
-                <td>{r.due_date}</td>
-                <td className="mono">{r.part_number}</td>
-                <td>{r.quantity}</td>
-                <td>{categorySummary(r,"Flats")}</td>
-                <td>{categorySummary(r,"Shapes")}</td>
-                <td>{r.owner}</td>
-                <td><button className="btn" onClick={()=>onEdit(r)}>Edit</button></td>
-              </tr>
-            )):<tr><td colSpan="10" className="empty">No matching Need Material orders.</td></tr>}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <RefreshStatusPanel
+      status={refreshStatus}
+      sourceFilename={sourceFilename}
+      lastRefresh={loadingRows&&!refreshing?"Loading…":lastRefresh}
+      activeCount={panelActiveCount}
+      stats={refreshStats}
+      durationLabel={refreshDurationLabel}
+      errorMessage={refreshError}
+      canRefresh={canRefresh}
+      refreshing={refreshing}
+      runningStepIndex={runningStepIndex}
+      onRefresh={refresh}
+    />
+
+    <ActiveOrdersBar count={activeCount} />
+
+    <SearchFilters
+      search={search}
+      setSearch={setSearch}
+      kpiFilter={kpiFilter}
+      setKpiFilter={setKpiFilter}
+    />
+
+    <WorkOrderTable
+      columns={TABLE_COLUMNS}
+      visibleRows={visibleRows}
+      sortKey={sortKey}
+      sortDir={sortDir}
+      onSort={onSort}
+      loadingRows={loadingRows}
+      canEdit={canEdit}
+      onEdit={onEdit}
+      categorySummary={categorySummary}
+    />
   </section>;
 }
 
-function Admin({users,onInvite,onToggle,onRemove}){
+function Admin({users,loading,onInvite,onToggle,onRemove}){
   return <section>
     <div className="page-head">
       <div>
@@ -505,20 +731,20 @@ function Admin({users,onInvite,onToggle,onRemove}){
     </div>
     <div className="admin-grid">
       <div className="panel table-panel">
-        <div className="panel-head"><h2>Authorized Users</h2><span>{users.length} users</span></div>
+        <div className="panel-head"><h2>Authorized Users</h2><span>{loading?"Loading…":`${users.length} users`}</span></div>
         <div className="tablewrap">
           <table className="table users-table">
             <thead><tr><th>User</th><th>Role</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
             <tbody>
-              {users.map((u,i)=>(
-                <tr key={u.email}>
+              {loading?<tr><td colSpan="5" className="empty">Loading allowlist…</td></tr>:users.map(u=>(
+                <tr key={u.id||u.email}>
                   <td><b>{u.name}</b><br/><span className="muted">{u.email}</span></td>
                   <td><span className="role">{u.role}</span></td>
                   <td><span className={`status ${u.status==="Pending"?"pending":""}`}>{u.status}</span></td>
                   <td>{u.last}</td>
                   <td>
-                    <button className="btn" onClick={()=>onToggle(i)}>{u.status==="Disabled"?"Enable":"Disable"}</button>{" "}
-                    <button className="btn danger" onClick={()=>onRemove(i)}>Remove</button>
+                    <button className="btn" onClick={()=>onToggle(u)}>{String(u.status).toLowerCase()==="disabled"?"Enable":"Disable"}</button>{" "}
+                    <button className="btn danger" onClick={()=>onRemove(u)}>Remove</button>
                   </td>
                 </tr>
               ))}
@@ -539,20 +765,22 @@ function Admin({users,onInvite,onToggle,onRemove}){
   </section>;
 }
 
-function EditModal({row,onClose,onSave,saving}){
+function EditModal({row,onClose,onSave,saving,readOnly=false}){
   const [v,setV]=useState(()=>normalizeRow(row));
   const lines=materialLines(v);
   const flats=lines.filter(l=>l.material_category==="Flats");
   const shapes=lines.filter(l=>l.material_category==="Shapes");
-  const updateLine=(id,patch)=>setV({...v,material_lines:lines.map(l=>l.id===id?{...l,...patch}:l)});
-  const addLine=category=>setV({...v,material_lines:[...lines,newMaterialLine(category)]});
+  const locked=saving||readOnly;
+  const updateLine=(id,patch)=>{if(readOnly)return;setV({...v,material_lines:lines.map(l=>l.id===id?{...l,...patch}:l)});};
+  const addLine=category=>{if(readOnly)return;setV({...v,material_lines:[...lines,newMaterialLine(category)]});};
   const removeLine=id=>{
+    if(readOnly)return;
     if(!window.confirm("Remove this material line?"))return;
     setV({...v,material_lines:lines.filter(l=>l.id!==id)});
   };
   return <div className="modal-back">
     <div className="modal modal-wide">
-      <div className="modal-head"><h2>Edit {row.work_order}</h2><button className="x" onClick={onClose} disabled={saving}>×</button></div>
+      <div className="modal-head"><h2>{readOnly?"View":"Edit"} {row.work_order}</h2><button className="x" onClick={onClose} disabled={saving}>×</button></div>
       <div className="modal-body">
         <div className="field readonly-field">
           <label>Customer PO</label>
@@ -560,7 +788,7 @@ function EditModal({row,onClose,onSave,saving}){
         </div>
         <div className="field">
           <label>Owner</label>
-          <select value={v.owner} onChange={e=>setV({...v,owner:e.target.value})} disabled={saving}>
+          <select value={v.owner} onChange={e=>setV({...v,owner:e.target.value})} disabled={locked}>
             <option>Chris Vieux</option>
             <option>Buyer 1</option>
             <option>Unassigned</option>
@@ -568,24 +796,24 @@ function EditModal({row,onClose,onSave,saving}){
         </div>
         <div className="field">
           <label>Notes</label>
-          <textarea value={v.follow_up_notes} onChange={e=>setV({...v,follow_up_notes:e.target.value})} disabled={saving}/>
+          <textarea value={v.follow_up_notes} onChange={e=>setV({...v,follow_up_notes:e.target.value})} disabled={locked}/>
         </div>
-        <MaterialSection title="Flats" lines={flats} onAdd={()=>addLine("Flats")} onChange={updateLine} onRemove={removeLine} disabled={saving}/>
-        <MaterialSection title="Shapes" lines={shapes} onAdd={()=>addLine("Shapes")} onChange={updateLine} onRemove={removeLine} disabled={saving}/>
+        <MaterialSection title="Flats" lines={flats} onAdd={()=>addLine("Flats")} onChange={updateLine} onRemove={removeLine} disabled={locked} readOnly={readOnly}/>
+        <MaterialSection title="Shapes" lines={shapes} onAdd={()=>addLine("Shapes")} onChange={updateLine} onRemove={removeLine} disabled={locked} readOnly={readOnly}/>
       </div>
       <div className="modal-foot">
-        <button className="btn" onClick={onClose} disabled={saving}>Cancel</button>
-        <button className="btn primary" onClick={()=>onSave(v)} disabled={saving}>{saving?"Saving…":"Save"}</button>
+        <button className="btn" onClick={onClose} disabled={saving}>{readOnly?"Close":"Cancel"}</button>
+        {!readOnly&&<button className="btn primary" onClick={()=>onSave(v)} disabled={saving}>{saving?"Saving…":"Save"}</button>}
       </div>
     </div>
   </div>;
 }
 
-function MaterialSection({title,lines,onAdd,onChange,onRemove,disabled}){
+function MaterialSection({title,lines,onAdd,onChange,onRemove,disabled,readOnly=false}){
   return <div className="material-section">
     <div className="material-section-head">
       <h3>{title}</h3>
-      <button type="button" className="btn" onClick={onAdd} disabled={disabled}>+ Add {title} Material</button>
+      {!readOnly&&<button type="button" className="btn" onClick={onAdd} disabled={disabled}>+ Add {title} Material</button>}
     </div>
     {lines.length===0?<p className="material-empty">No {title.toLowerCase()} material lines yet.</p>:
       lines.map(line=><div className="material-line" key={line.id}>
@@ -601,9 +829,9 @@ function MaterialSection({title,lines,onAdd,onChange,onRemove,disabled}){
             </select>
           </div>
         </div>
-        <div className="material-line-actions">
+        {!readOnly&&<div className="material-line-actions">
           <button type="button" className="btn danger" onClick={()=>onRemove(line.id)} disabled={disabled}>Remove</button>
-        </div>
+        </div>}
       </div>)}
   </div>;
 }
@@ -616,15 +844,25 @@ function InviteModal({onClose,onSave}){
   const [name,setName]=useState("");
   const [email,setEmail]=useState("");
   const [role,setRole]=useState("Purchasing");
+  const [saving,setSaving]=useState(false);
+  async function submit(){
+    if(!name||!email.includes("@")||saving)return;
+    setSaving(true);
+    try{
+      await onSave({name,email,role});
+    }finally{
+      setSaving(false);
+    }
+  }
   return <div className="modal-back">
     <div className="modal">
-      <div className="modal-head"><h2>Invite User</h2><button className="x" onClick={onClose}>×</button></div>
+      <div className="modal-head"><h2>Invite User</h2><button className="x" onClick={onClose} disabled={saving}>×</button></div>
       <div className="modal-body">
-        <Field label="Name" value={name} set={setName}/>
-        <Field label="Kannon Email" value={email} set={setEmail} type="email"/>
+        <Field label="Name" value={name} set={setName} disabled={saving}/>
+        <Field label="Kannon Email" value={email} set={setEmail} type="email" disabled={saving}/>
         <div className="field">
           <label>Role</label>
-          <select value={role} onChange={e=>setRole(e.target.value)}>
+          <select value={role} onChange={e=>setRole(e.target.value)} disabled={saving}>
             <option>Viewer</option>
             <option>Purchasing</option>
             <option>Scheduler</option>
@@ -633,8 +871,8 @@ function InviteModal({onClose,onSave}){
         </div>
       </div>
       <div className="modal-foot">
-        <button className="btn" onClick={onClose}>Cancel</button>
-        <button className="btn primary" onClick={()=>name&&email.includes("@")&&onSave({name,email,role,status:"Pending",last:"Never"})}>Send Invitation</button>
+        <button className="btn" onClick={onClose} disabled={saving}>Cancel</button>
+        <button className="btn primary" onClick={submit} disabled={saving}>{saving?"Saving…":"Send Invitation"}</button>
       </div>
     </div>
   </div>;

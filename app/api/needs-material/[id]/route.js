@@ -1,3 +1,4 @@
+import { requireEditor } from "../../../../lib/auth/api";
 import { getSupabaseAdmin } from "../../../../lib/supabase/server";
 import {
   isUuid,
@@ -20,6 +21,9 @@ function str(value) {
 }
 
 export async function PUT(request, context) {
+  const { user, error: authError } = await requireEditor();
+  if (authError) return authError;
+
   try {
     const { id } = await context.params;
     if (!isUuid(id)) {
@@ -58,7 +62,7 @@ export async function PUT(request, context) {
     for (const field of ["owner", "follow_up_notes"]) {
       if (str(existingParent[field]) !== str(patch[field])) {
         auditEntries.push({
-          user_id: null,
+          user_id: user.id,
           action: "update_field",
           record_type: "needs_material",
           record_id: id,
@@ -103,7 +107,7 @@ export async function PUT(request, context) {
         ]) {
           if (str(previous[field]) !== str(savedLine[field])) {
             auditEntries.push({
-              user_id: null,
+              user_id: user.id,
               action: "update_field",
               record_type: "material_lines",
               record_id: savedLine.id,
@@ -122,7 +126,7 @@ export async function PUT(request, context) {
         if (lineInsertError) throw lineInsertError;
         keepIds.add(createdLine.id);
         auditEntries.push({
-          user_id: null,
+          user_id: user.id,
           action: "add_material_line",
           record_type: "material_lines",
           record_id: createdLine.id,
@@ -141,7 +145,7 @@ export async function PUT(request, context) {
         .eq("id", line.id);
       if (deleteError) throw deleteError;
       auditEntries.push({
-        user_id: null,
+        user_id: user.id,
         action: "remove_material_line",
         record_type: "material_lines",
         record_id: line.id,

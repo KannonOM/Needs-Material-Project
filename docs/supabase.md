@@ -1,6 +1,6 @@
 # Supabase setup — Needs Material Dashboard
 
-This project uses Supabase (PostgreSQL) for shared storage. The Sunday prototype UI still runs on local sample data and localStorage. Database work in Phase 3 only prepares the schema.
+This project uses Supabase (PostgreSQL) for shared storage. The Next.js API uses the service role server-side after Microsoft Entra + allowlist authorization. See also [microsoft-entra.md](microsoft-entra.md).
 
 ## Required environment variables
 
@@ -42,6 +42,10 @@ supabase db push
 ```
 
 (or apply `001_init.sql` with your preferred migration workflow)
+
+Then apply [`supabase/migrations/002_allowed_users_email_ci.sql`](../supabase/migrations/002_allowed_users_email_ci.sql) so existing emails are lowercased and case-only duplicates are blocked.
+
+Then apply [`supabase/migrations/003_refresh_history_diagnostics.sql`](../supabase/migrations/003_refresh_history_diagnostics.sql) for SharePoint refresh diagnostic columns.
 
 ## Replace the administrator email placeholder
 
