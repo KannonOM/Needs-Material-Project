@@ -289,9 +289,28 @@ button{cursor:pointer}
   letter-spacing:.04em;
 }
 .status-pill.idle{background:var(--surface);color:var(--muted)}
-.status-pill.success{background:var(--greenbg);color:var(--green)}
-.status-pill.failed{background:var(--redbg);color:var(--red)}
-.status-pill.running{background:var(--blue2);color:var(--blue)}
+.status-pill.success,.status-pill.active{background:var(--greenbg);color:var(--green)}
+.status-pill.failed,.status-pill.inactive{background:var(--redbg);color:var(--red)}
+.status-pill.running,.status-pill.invited{background:var(--amberbg);color:var(--amber)}
+.admin-page .admin-filters-row{
+  grid-template-columns:minmax(0,1.4fr) auto auto;
+}
+.admin-users-table{min-width:1100px}
+.admin-actions{display:flex;gap:8px;flex-wrap:wrap}
+.you-tag{
+  display:inline-flex;
+  margin-left:8px;
+  padding:2px 7px;
+  border-radius:999px;
+  background:var(--blue2);
+  color:var(--blue);
+  font-size:10px;
+  font-weight:800;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+  vertical-align:middle;
+}
+.form-error{margin:0;color:var(--red);font-size:13px}
 .refresh-error{margin:0 0 12px;color:var(--red);font-size:13px}
 .refresh-stats{
   display:grid;

@@ -1,37 +1,19 @@
 import { requireAdministrator } from "../../../lib/auth/api";
 import { getSupabaseAdmin } from "../../../lib/supabase/server";
 import { normalizeEmail } from "../../../lib/auth/allowlist";
-import { displayRole, normalizeRole, ROLES } from "../../../lib/auth/permissions";
+import { ROLES } from "../../../lib/auth/permissions";
+import {
+  FORM_ROLES,
+  STATUS,
+  mapAllowedUser,
+  normalizeStatus,
+  parseAssignableRole,
+} from "../../../lib/auth/user-labels";
 
 export const dynamic = "force-dynamic";
 
-const ROLE_SET = new Set(Object.values(ROLES));
-
-function mapUser(row) {
-  return {
-    id: row.id,
-    name: row.full_name,
-    email: normalizeEmail(row.email),
-    role: displayRole(row.role),
-    roleKey: normalizeRole(row.role),
-    status: String(row.status || "")
-      .replace(/^\w/, (c) => c.toUpperCase()),
-    statusKey: row.status,
-    last: row.accepted_at
-      ? new Date(row.accepted_at).toLocaleDateString("en-US")
-      : row.invited_at
-        ? "Invited"
-        : "Never",
-    invited_at: row.invited_at,
-    accepted_at: row.accepted_at,
-  };
-}
-
-function parseRole(input) {
-  const key = normalizeRole(input);
-  if (ROLE_SET.has(key)) return key;
-  return null;
-}
+const SELECT_FIELDS =
+  "id, email, full_name, role, status, invited_at, accepted_at, created_at, updated_at, disabled_at";
 
 export async function GET() {
   const { error: authError } = await requireAdministrator();
@@ -41,17 +23,15 @@ export async function GET() {
     const supabase = getSupabaseAdmin();
     const { data, error } = await supabase
       .from("allowed_users")
-      .select(
-        "id, email, full_name, role, status, invited_at, accepted_at, created_at"
-      )
+      .select(SELECT_FIELDS)
       .order("full_name", { ascending: true });
 
     if (error) throw error;
-    return Response.json({ users: (data || []).map(mapUser) });
+    return Response.json({ users: (data || []).map(mapAllowedUser) });
   } catch (error) {
     console.error("GET /api/allowed-users failed", error);
     return Response.json(
-      { error: error?.message || "Failed to load users" },
+      { error: "Failed to load users" },
       { status: 500 }
     );
   }
@@ -65,15 +45,29 @@ export async function POST(request) {
     const body = await request.json();
     const email = normalizeEmail(body.email);
     const fullName = String(body.name || body.full_name || "").trim();
-    const role = parseRole(body.role);
+    const role = parseAssignableRole(body.role || FORM_ROLES.BUYER);
+    const status = normalizeStatus(body.status || STATUS.INVITED);
 
-    if (!fullName || !email.includes("@") || !role) {
+    if (!fullName) {
+      return Response.json({ error: "Full name is required" }, { status: 400 });
+    }
+    if (!email || !email.includes("@")) {
+      return Response.json({ error: "A valid email is required" }, { status: 400 });
+    }
+    if (!role || (role !== ROLES.ADMINISTRATOR && role !== ROLES.PURCHASING)) {
       return Response.json(
-        { error: "Name, valid email, and role are required" },
+        { error: "Role must be administrator or buyer" },
+        { status: 400 }
+      );
+    }
+    if (!status) {
+      return Response.json(
+        { error: "Status must be active, invited, or inactive" },
         { status: 400 }
       );
     }
 
+    const now = new Date().toISOString();
     const supabase = getSupabaseAdmin();
     const { data, error } = await supabase
       .from("allowed_users")
@@ -81,13 +75,12 @@ export async function POST(request) {
         email,
         full_name: fullName,
         role,
-        status: "pending",
-        invited_at: new Date().toISOString(),
+        status,
+        invited_at: now,
+        disabled_at: status === STATUS.INACTIVE ? now : null,
         created_by: user.id,
       })
-      .select(
-        "id, email, full_name, role, status, invited_at, accepted_at, created_at"
-      )
+      .select(SELECT_FIELDS)
       .single();
 
     if (error) {
@@ -107,17 +100,17 @@ export async function POST(request) {
       record_id: data.id,
       field_name: "status",
       old_value: null,
-      new_value: "pending",
+      new_value: status,
     });
 
     return Response.json({
-      user: mapUser(data),
-      note: "Allowlist entry created. Invitation email delivery is not wired yet.",
+      user: mapAllowedUser(data),
+      note: "User created on the allowlist. Invitation email delivery is not wired yet.",
     });
   } catch (error) {
     console.error("POST /api/allowed-users failed", error);
     return Response.json(
-      { error: error?.message || "Failed to invite user" },
+      { error: "Failed to create user" },
       { status: 500 }
     );
   }

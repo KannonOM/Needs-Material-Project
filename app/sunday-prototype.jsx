@@ -19,6 +19,7 @@ import RefreshHistoryPage from "../components/dashboard/RefreshHistoryPage";
 import SessionLoading from "../components/dashboard/SessionLoading";
 import SessionError from "../components/dashboard/SessionError";
 import LoadError from "../components/dashboard/LoadError";
+import AdminPage from "../components/admin/AdminPage";
 import Button from "../components/ui/Button";
 
 const MATERIAL_LINE_STATUSES=[
@@ -278,8 +279,8 @@ export default function SundayPrototype(){
   const [sortKey,setSortKey]=useState("due_date");
   const [sortDir,setSortDir]=useState("asc");
   const [edit,setEdit]=useState(null);
-  const [invite,setInvite]=useState(false);
   const [toast,setToast]=useState("");
+  const [ownerOptions,setOwnerOptions]=useState([{value:"Unassigned",label:"Unassigned"}]);
   const [lastRefresh,setLastRefresh]=useState("Not loaded yet");
   const [sourceFilename,setSourceFilename]=useState("Production Scheduler - 2026.xlsx");
   const [refreshing,setRefreshing]=useState(false);
@@ -496,9 +497,21 @@ export default function SundayPrototype(){
     return()=>{cancelled=true};
   },[signedIn,canAdmin,page]);
 
+  async function loadOwnerOptions(){
+    try{
+      const res=await fetch("/api/allowed-users/owners",{cache:"no-store"});
+      const data=await res.json();
+      if(!res.ok)throw new Error(data.error||"Failed to load owners");
+      if(Array.isArray(data.owners))setOwnerOptions(data.owners);
+    }catch(error){
+      console.error(error);
+    }
+  }
+
   useEffect(()=>{
-    if(!canAdmin&&page==="admin")setPage("dashboard");
-  },[canAdmin,page]);
+    if(!signedIn)return;
+    loadOwnerOptions();
+  },[signedIn]);
 
   async function saveWorkOrder(updated){
     if(!canEdit){
@@ -534,54 +547,74 @@ export default function SundayPrototype(){
     }
   }
 
-  async function inviteUser(payload){
-    try{
-      const res=await fetch("/api/allowed-users",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify(payload)
-      });
-      const data=await res.json();
-      if(!res.ok)throw new Error(data.error||"Invite failed");
-      setUsers(prev=>[...prev,data.user].sort((a,b)=>a.name.localeCompare(b.name)));
-      setInvite(false);
-      notify(data.note||`Invitation queued for ${data.user.email}`);
-    }catch(error){
-      console.error(error);
-      notify(error.message||"Invite failed");
-    }
+  async function createUser(payload){
+    const res=await fetch("/api/allowed-users",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(payload)
+    });
+    const data=await res.json();
+    if(!res.ok)throw new Error(data.error||"Could not create user");
+    setUsers(prev=>[...prev,data.user].sort((a,b)=>a.name.localeCompare(b.name)));
+    await loadOwnerOptions();
+    notify(data.note||`${data.user.name} added`);
+    return data.user;
   }
 
-  async function toggleUserStatus(user){
-    const current=String(user.statusKey||user.status).toLowerCase();
-    const nextStatus=current==="active"?"disabled":"active";
+  async function updateUser(user,payload){
+    const res=await fetch(`/api/allowed-users/${user.id}`,{
+      method:"PATCH",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        name:payload.name,
+        role:payload.role,
+        status:payload.status
+      })
+    });
+    const data=await res.json();
+    if(!res.ok)throw new Error(data.error||"Could not update user");
+    setUsers(prev=>prev.map(u=>u.id===data.user.id?data.user:u));
+    await loadOwnerOptions();
+    notify(`${data.user.name} updated`);
+    return data.user;
+  }
+
+  async function activateUser(user){
     try{
       const res=await fetch(`/api/allowed-users/${user.id}`,{
         method:"PATCH",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({status:nextStatus})
+        body:JSON.stringify({status:"active"})
       });
       const data=await res.json();
-      if(!res.ok)throw new Error(data.error||"Update failed");
+      if(!res.ok)throw new Error(data.error||"Could not activate user");
       setUsers(prev=>prev.map(u=>u.id===data.user.id?data.user:u));
-      notify(`${data.user.name} is now ${data.user.status}`);
+      await loadOwnerOptions();
+      notify(`${data.user.name} is now Active`);
     }catch(error){
       console.error(error);
-      notify(error.message||"Update failed");
+      notify(error.message||"Activate failed");
     }
   }
 
-  async function removeUser(user){
-    if(user.email==="cvieux@kannonmfg.com")return notify("The primary administrator cannot be removed.");
+  async function deactivateUser(user){
+    if(!window.confirm(`Deactivate ${user.name}? They will lose dashboard access on the next sign-in check.`)){
+      return;
+    }
     try{
-      const res=await fetch(`/api/allowed-users/${user.id}`,{method:"DELETE"});
+      const res=await fetch(`/api/allowed-users/${user.id}`,{
+        method:"PATCH",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({status:"inactive"})
+      });
       const data=await res.json();
-      if(!res.ok)throw new Error(data.error||"Remove failed");
-      setUsers(prev=>prev.filter(u=>u.id!==user.id));
-      notify("User removed");
+      if(!res.ok)throw new Error(data.error||"Could not deactivate user");
+      setUsers(prev=>prev.map(u=>u.id===data.user.id?data.user:u));
+      await loadOwnerOptions();
+      notify(`${data.user.name} is now Inactive`);
     }catch(error){
       console.error(error);
-      notify(error.message||"Remove failed");
+      notify(error.message||"Deactivate failed");
     }
   }
 
@@ -721,25 +754,31 @@ export default function SundayPrototype(){
         />
       )}
       {page==="admin"&&(
-        <Admin
-          users={users}
-          loading={loadingUsers}
-          onInvite={()=>setInvite(true)}
-          onToggle={toggleUserStatus}
-          onRemove={removeUser}
-        />
+        canAdmin?
+          <AdminPage
+            users={users}
+            loading={loadingUsers}
+            currentUserEmail={session?.user?.email||""}
+            onCreate={createUser}
+            onUpdate={updateUser}
+            onActivate={activateUser}
+            onDeactivate={deactivateUser}
+          />:
+          <LoadError
+            title="Administration access denied"
+            message="Only active administrators can manage dashboard users."
+            onRetry={()=>setPage("dashboard")}
+            retryLabel="Back to Dashboard"
+          />
       )}
     </main>
     {edit&&<EditModal
       row={edit}
       saving={savingEdit}
       readOnly={!canEdit}
+      ownerOptions={ownerOptions}
       onClose={()=>!savingEdit&&setEdit(null)}
       onSave={saveWorkOrder}
-    />}
-    {invite&&canAdmin&&<InviteModal
-      onClose={()=>setInvite(false)}
-      onSave={inviteUser}
     />}
     {toast&&<div className="toast">{toast}</div>}
   </div>;
@@ -863,57 +902,20 @@ function Dashboard({
   </section>;
 }
 
-function Admin({users,loading,onInvite,onToggle,onRemove}){
-  return <section>
-    <div className="page-head">
-      <div>
-        <h1>Administration</h1>
-        <p>Manage dashboard users and their access.</p>
-      </div>
-      <div className="actions"><button className="btn primary" onClick={onInvite}>Invite User</button></div>
-    </div>
-    <div className="admin-grid">
-      <div className="panel table-panel">
-        <div className="panel-head"><h2>Authorized Users</h2><span>{loading?"Loading…":`${users.length} users`}</span></div>
-        <div className="tablewrap">
-          <table className="table users-table">
-            <thead><tr><th>User</th><th>Role</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
-            <tbody>
-              {loading?<tr><td colSpan="5" className="empty">Loading allowlist…</td></tr>:users.map(u=>(
-                <tr key={u.id||u.email}>
-                  <td><b>{u.name}</b><br/><span className="muted">{u.email}</span></td>
-                  <td><span className="role">{u.role}</span></td>
-                  <td><span className={`status ${u.status==="Pending"?"pending":""}`}>{u.status}</span></td>
-                  <td>{u.last}</td>
-                  <td>
-                    <button className="btn" onClick={()=>onToggle(u)}>{String(u.status).toLowerCase()==="disabled"?"Enable":"Disable"}</button>{" "}
-                    <button className="btn danger" onClick={()=>onRemove(u)}>Remove</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      <aside className="side-card">
-        <h3>How access works</h3>
-        <ol>
-          <li>You invite a Kannon employee.</li>
-          <li>Their Microsoft 365 email is added to the allowlist.</li>
-          <li>They sign in with Microsoft.</li>
-          <li>The dashboard applies the role you assigned.</li>
-        </ol>
-      </aside>
-    </div>
-  </section>;
-}
-
-function EditModal({row,onClose,onSave,saving,readOnly=false}){
+function EditModal({row,onClose,onSave,saving,readOnly=false,ownerOptions=[]}){
   const [v,setV]=useState(()=>normalizeRow(row));
   const lines=materialLines(v);
   const flats=lines.filter(l=>l.material_category==="Flats");
   const shapes=lines.filter(l=>l.material_category==="Shapes");
   const locked=saving||readOnly;
+  const ownerChoices=useMemo(()=>{
+    const values=ownerOptions.length?ownerOptions:[{value:"Unassigned",label:"Unassigned"}];
+    const current=v.owner||"Unassigned";
+    if(current&&!values.some(o=>o.value===current)){
+      return [{value:current,label:`${current} (saved)`},...values];
+    }
+    return values;
+  },[ownerOptions,v.owner]);
   const updateLine=(id,patch)=>{if(readOnly)return;setV({...v,material_lines:lines.map(l=>l.id===id?{...l,...patch}:l)});};
   const addLine=category=>{if(readOnly)return;setV({...v,material_lines:[...lines,newMaterialLine(category)]});};
   const removeLine=id=>{
@@ -938,10 +940,10 @@ function EditModal({row,onClose,onSave,saving,readOnly=false}){
           </div>
           <div className="field">
             <label>Owner</label>
-            <select value={v.owner} onChange={e=>setV({...v,owner:e.target.value})} disabled={locked}>
-              <option>Chris Vieux</option>
-              <option>Buyer 1</option>
-              <option>Unassigned</option>
+            <select value={v.owner||"Unassigned"} onChange={e=>setV({...v,owner:e.target.value})} disabled={locked}>
+              {ownerChoices.map(opt=>(
+                <option key={`${opt.value}-${opt.label}`} value={opt.value}>{opt.label}</option>
+              ))}
             </select>
           </div>
         </div>
@@ -989,42 +991,4 @@ function MaterialSection({title,lines,onAdd,onChange,onRemove,disabled,readOnly=
 
 function Field({label,value,set,type="text",disabled}){
   return <div className="field"><label>{label}</label><input type={type} value={value||""} onChange={e=>set(e.target.value)} disabled={disabled}/></div>;
-}
-
-function InviteModal({onClose,onSave}){
-  const [name,setName]=useState("");
-  const [email,setEmail]=useState("");
-  const [role,setRole]=useState("Purchasing");
-  const [saving,setSaving]=useState(false);
-  async function submit(){
-    if(!name||!email.includes("@")||saving)return;
-    setSaving(true);
-    try{
-      await onSave({name,email,role});
-    }finally{
-      setSaving(false);
-    }
-  }
-  return <div className="modal-back">
-    <div className="modal">
-      <div className="modal-head"><h2>Invite User</h2><button className="x" onClick={onClose} disabled={saving}>×</button></div>
-      <div className="modal-body">
-        <Field label="Name" value={name} set={setName} disabled={saving}/>
-        <Field label="Kannon Email" value={email} set={setEmail} type="email" disabled={saving}/>
-        <div className="field">
-          <label>Role</label>
-          <select value={role} onChange={e=>setRole(e.target.value)} disabled={saving}>
-            <option>Viewer</option>
-            <option>Purchasing</option>
-            <option>Scheduler</option>
-            <option>Administrator</option>
-          </select>
-        </div>
-      </div>
-      <div className="modal-foot">
-        <button className="btn" onClick={onClose} disabled={saving}>Cancel</button>
-        <button className="btn primary" onClick={submit} disabled={saving}>{saving?"Saving…":"Send Invitation"}</button>
-      </div>
-    </div>
-  </div>;
 }
