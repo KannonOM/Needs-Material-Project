@@ -21,6 +21,10 @@ import SessionError from "../components/dashboard/SessionError";
 import LoadError from "../components/dashboard/LoadError";
 import AdminPage from "../components/admin/AdminPage";
 import Button from "../components/ui/Button";
+import {
+  isBlankPurchasedPartLine,
+  normalizeMaterialCategory
+} from "../lib/needs-material/map";
 
 const MATERIAL_LINE_STATUSES=[
   "Not Ordered",
@@ -45,6 +49,7 @@ const TABLE_COLUMNS=[
   {key:"quantity",label:"Qty",sortable:true},
   {key:"flats",label:"Flats",sortable:false},
   {key:"shapes",label:"Shapes",sortable:false},
+  {key:"purchased_parts",label:"Purchased",sortable:false},
   {key:"owner",label:"Owner",sortable:true}
 ];
 
@@ -106,7 +111,7 @@ function normalizeRow(r){
       customer_po:r.customer_po||"",
       material_lines:r.material_lines.map((line,i)=>({
         id:line.id||`line-${r.id}-${i+1}`,
-        material_category:line.material_category==="Shapes"?"Shapes":"Flats",
+        material_category:normalizeMaterialCategory(line.material_category),
         material_type:line.material_type||"",
         supplier:line.supplier||"",
         material_po:line.material_po||"",
@@ -192,6 +197,17 @@ function newMaterialLine(category){
   };
 }
 
+/** Ensure Edit modal always has one Purchased Parts row (blank placeholder if none saved). */
+function withDefaultPurchasedPartRow(row){
+  const normalized=normalizeRow(row);
+  const lines=materialLines(normalized);
+  if(lines.some(l=>l.material_category==="Purchased Parts"))return normalized;
+  return{
+    ...normalized,
+    material_lines:[...lines,newMaterialLine("Purchased Parts")]
+  };
+}
+
 function compareValues(a,b,key){
   if(key==="days_to_ship"){
     const ad=daysUntilDue(a.due_date);
@@ -203,6 +219,9 @@ function compareValues(a,b,key){
   }
   if(key==="flats")return categorySummary(a,"Flats").localeCompare(categorySummary(b,"Flats"));
   if(key==="shapes")return categorySummary(a,"Shapes").localeCompare(categorySummary(b,"Shapes"));
+  if(key==="purchased_parts"){
+    return categorySummary(a,"Purchased Parts").localeCompare(categorySummary(b,"Purchased Parts"));
+  }
   if(key==="quantity")return(Number(a.quantity)||0)-(Number(b.quantity)||0);
   const av=(a[key]??"").toString();
   const bv=(b[key]??"").toString();
@@ -526,7 +545,9 @@ export default function SundayPrototype(){
         body:JSON.stringify({
           owner:updated.owner,
           follow_up_notes:updated.follow_up_notes,
-          material_lines:updated.material_lines||[]
+          material_lines:(updated.material_lines||[]).filter(
+            line=>!isBlankPurchasedPartLine(line)
+          )
         })
       });
       const data=await res.json();
@@ -658,7 +679,8 @@ export default function SundayPrototype(){
       list=list.filter(r=>{
         const hay=[
           r.work_order,r.customer_po,r.customer,r.due_date,r.part_number,r.description,r.quantity,
-          r.owner,r.follow_up_notes,categorySummary(r,"Flats"),categorySummary(r,"Shapes"),
+          r.owner,r.follow_up_notes,
+          categorySummary(r,"Flats"),categorySummary(r,"Shapes"),categorySummary(r,"Purchased Parts"),
           ...materialLines(r).flatMap(l=>[l.material_type,l.supplier,l.material_po,l.ead,l.status])
         ].join(" ").toLowerCase();
         return hay.includes(q);
@@ -903,10 +925,11 @@ function Dashboard({
 }
 
 function EditModal({row,onClose,onSave,saving,readOnly=false,ownerOptions=[]}){
-  const [v,setV]=useState(()=>normalizeRow(row));
+  const [v,setV]=useState(()=>withDefaultPurchasedPartRow(row));
   const lines=materialLines(v);
   const flats=lines.filter(l=>l.material_category==="Flats");
   const shapes=lines.filter(l=>l.material_category==="Shapes");
+  const purchasedParts=lines.filter(l=>l.material_category==="Purchased Parts");
   const locked=saving||readOnly;
   const ownerChoices=useMemo(()=>{
     const values=ownerOptions.length?ownerOptions:[{value:"Unassigned",label:"Unassigned"}];
@@ -921,7 +944,11 @@ function EditModal({row,onClose,onSave,saving,readOnly=false,ownerOptions=[]}){
   const removeLine=id=>{
     if(readOnly)return;
     if(!window.confirm("Remove this material line?"))return;
-    setV({...v,material_lines:lines.filter(l=>l.id!==id)});
+    let next=lines.filter(l=>l.id!==id);
+    if(!next.some(l=>l.material_category==="Purchased Parts")){
+      next=[...next,newMaterialLine("Purchased Parts")];
+    }
+    setV({...v,material_lines:next});
   };
   return <div className="modal-back">
     <div className="modal modal-wide">
@@ -953,6 +980,17 @@ function EditModal({row,onClose,onSave,saving,readOnly=false,ownerOptions=[]}){
         </div>
         <MaterialSection title="Flats" lines={flats} onAdd={()=>addLine("Flats")} onChange={updateLine} onRemove={removeLine} disabled={locked} readOnly={readOnly}/>
         <MaterialSection title="Shapes" lines={shapes} onAdd={()=>addLine("Shapes")} onChange={updateLine} onRemove={removeLine} disabled={locked} readOnly={readOnly}/>
+        <MaterialSection
+          title="Purchased"
+          addLabel="+ Add Purchased Part"
+          typeLabel="Part Number / Material Type"
+          lines={purchasedParts}
+          onAdd={()=>addLine("Purchased Parts")}
+          onChange={updateLine}
+          onRemove={removeLine}
+          disabled={locked}
+          readOnly={readOnly}
+        />
       </div>
       <div className="modal-foot">
         <Button onClick={onClose} disabled={saving}>{readOnly?"Close":"Cancel"}</Button>
@@ -962,16 +1000,29 @@ function EditModal({row,onClose,onSave,saving,readOnly=false,ownerOptions=[]}){
   </div>;
 }
 
-function MaterialSection({title,lines,onAdd,onChange,onRemove,disabled,readOnly=false}){
+function MaterialSection({
+  title,
+  lines,
+  onAdd,
+  onChange,
+  onRemove,
+  disabled,
+  readOnly=false,
+  addLabel,
+  typeLabel="Material Type",
+  emptyLabel
+}){
+  const buttonLabel=addLabel||`+ Add ${title} Material`;
+  const emptyText=emptyLabel||`No ${title.toLowerCase()} material lines yet.`;
   return <div className="material-section">
     <div className="material-section-head">
       <h3>{title}</h3>
-      {!readOnly&&<Button type="button" onClick={onAdd} disabled={disabled}>+ Add {title} Material</Button>}
+      {!readOnly&&<Button type="button" onClick={onAdd} disabled={disabled}>{buttonLabel}</Button>}
     </div>
-    {lines.length===0?<p className="material-empty">No {title.toLowerCase()} material lines yet.</p>:
+    {lines.length===0?<p className="material-empty">{emptyText}</p>:
       lines.map(line=><div className="material-line" key={line.id}>
         <div className="material-line-grid">
-          <Field label="Material Type" value={line.material_type} set={x=>onChange(line.id,{material_type:x})} disabled={disabled}/>
+          <Field label={typeLabel} value={line.material_type} set={x=>onChange(line.id,{material_type:x})} disabled={disabled}/>
           <Field label="Supplier" value={line.supplier} set={x=>onChange(line.id,{supplier:x})} disabled={disabled}/>
           <Field label="Material PO" value={line.material_po} set={x=>onChange(line.id,{material_po:x})} disabled={disabled}/>
           <Field label="EAD" type="date" value={line.ead} set={x=>onChange(line.id,{ead:x})} disabled={disabled}/>

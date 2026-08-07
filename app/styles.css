@@ -586,7 +586,7 @@ button{cursor:pointer}
   max-height:none;
 }
 .table{border-collapse:collapse;width:100%;font-size:13px;white-space:nowrap}
-.work-order-table{min-width:1280px}
+.work-order-table{min-width:1380px}
 .table th{
   position:sticky;
   top:0;

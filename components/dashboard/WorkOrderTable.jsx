@@ -132,6 +132,7 @@ export default function WorkOrderTable({
                 const ship = daysToShipInfo(r.due_date);
                 const flats = categorySummary(r, "Flats");
                 const shapes = categorySummary(r, "Shapes");
+                const purchasedParts = categorySummary(r, "Purchased Parts");
                 return (
                   <tr key={r.id}>
                     <td className="mono">
@@ -159,6 +160,11 @@ export default function WorkOrderTable({
                     </td>
                     <td>
                       <span className={summaryBadgeClass(shapes)}>{shapes}</span>
+                    </td>
+                    <td>
+                      <span className={summaryBadgeClass(purchasedParts)}>
+                        {purchasedParts}
+                      </span>
                     </td>
                     <td>{r.owner || "—"}</td>
                     <td className="col-edit">

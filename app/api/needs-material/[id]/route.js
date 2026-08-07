@@ -1,6 +1,7 @@
 import { requireEditor } from "../../../../lib/auth/api";
 import { getSupabaseAdmin } from "../../../../lib/supabase/server";
 import {
+  isBlankPurchasedPartLine,
   isUuid,
   lineForUpsert,
   mapRowFromDb,
@@ -73,9 +74,9 @@ export async function PUT(request, context) {
       }
     }
 
-    const incomingLines = Array.isArray(body.material_lines)
-      ? body.material_lines
-      : [];
+    const incomingLines = (
+      Array.isArray(body.material_lines) ? body.material_lines : []
+    ).filter((line) => !isBlankPurchasedPartLine(line));
     const existingById = new Map(
       (existingLines || []).map((line) => [line.id, line])
     );
