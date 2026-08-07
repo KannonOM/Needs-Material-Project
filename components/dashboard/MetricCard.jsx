@@ -7,10 +7,11 @@ export default function MetricCard({ label, value, hint, active, onClick }) {
       type="button"
       className={`metric-card${active ? " active" : ""}`}
       onClick={onClick}
+      title={hint}
     >
       <label>{label}</label>
       <strong>{value}</strong>
-      <small>{hint}</small>
+      {hint ? <small>{hint}</small> : null}
     </Card>
   );
 }

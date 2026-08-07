@@ -3,11 +3,18 @@ import Card from "../ui/Card";
 
 const RUNNING_STEPS = [
   "Connected to Microsoft Graph",
-  "Opened SharePoint Site",
-  "Opened Workbook",
-  "Reading Worksheet",
-  "Processing Rows",
+  "Opened SharePoint site",
+  "Opened workbook",
+  "Reading worksheet",
+  "Processing rows",
 ];
+
+function StatusLabel({ state }) {
+  if (state === "running") return "Refreshing";
+  if (state === "success") return "Success";
+  if (state === "failed") return "Failed";
+  return "Idle";
+}
 
 export default function RefreshStatusPanel({
   status = "idle",
@@ -22,21 +29,19 @@ export default function RefreshStatusPanel({
   runningStepIndex = 0,
   onRefresh,
 }) {
-  const state = refreshing ? "running" : status;
+  const state = refreshing ? "running" : status || "idle";
 
   return (
-    <Card className="refresh-panel" id="refresh-panel">
+    <Card className={`refresh-panel refresh-panel-${state}`} id="refresh-panel">
       <div className="refresh-panel-head">
         <div>
           <h2>SharePoint Refresh</h2>
-          <p className="refresh-source">Source: {sourceFilename || "Production Scheduler - 2026.xlsx"}</p>
+          <p className="refresh-source">
+            Source: {sourceFilename || "Production Scheduler - 2026.xlsx"}
+          </p>
         </div>
         {canRefresh && (
-          <Button
-            variant="primary"
-            onClick={onRefresh}
-            disabled={refreshing}
-          >
+          <Button variant="primary" onClick={onRefresh} disabled={refreshing}>
             {refreshing ? "Refreshing…" : "Refresh Now"}
           </Button>
         )}
@@ -48,7 +53,7 @@ export default function RefreshStatusPanel({
           <div className="progress-track" aria-hidden="true">
             <div className="progress-indeterminate" />
           </div>
-          <ol className="refresh-steps">
+          <ol className="refresh-steps refresh-steps-horizontal">
             {RUNNING_STEPS.map((step, index) => (
               <li
                 key={step}
@@ -60,7 +65,8 @@ export default function RefreshStatusPanel({
                       : ""
                 }
               >
-                {step}
+                <span className="step-marker" aria-hidden="true" />
+                <span className="step-label">{step}</span>
               </li>
             ))}
           </ol>
@@ -71,16 +77,20 @@ export default function RefreshStatusPanel({
         <div className={`refresh-summary refresh-${state}`}>
           <div className="refresh-status-row">
             <span className={`status-pill ${state}`}>
-              {state === "success"
-                ? "Success"
-                : state === "failed"
-                  ? "Failed"
-                  : "Idle"}
+              <StatusLabel state={state} />
             </span>
-            <span className="refresh-time">Last refresh: {lastRefresh || "Not loaded yet"}</span>
+            <span className="refresh-time">
+              Last refresh: {lastRefresh || "Not loaded yet"}
+            </span>
           </div>
           {state === "failed" && errorMessage && (
             <p className="refresh-error">{errorMessage}</p>
+          )}
+          {state === "idle" && !stats && (
+            <p className="refresh-idle-note">
+              Use Refresh Now to import the latest Need Material work orders from
+              SharePoint.
+            </p>
           )}
           <div className="refresh-stats">
             <div>

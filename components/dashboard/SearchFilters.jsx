@@ -1,5 +1,4 @@
 import Button from "../ui/Button";
-import Card from "../ui/Card";
 import Input from "../ui/Input";
 
 export default function SearchFilters({
@@ -9,7 +8,7 @@ export default function SearchFilters({
   setKpiFilter,
 }) {
   return (
-    <Card className="search-filters">
+    <div className="search-filters">
       <Input
         className="search-input"
         placeholder="Search WO, customer PO, customer, part, material, owner, or notes"
@@ -22,6 +21,6 @@ export default function SearchFilters({
           Clear KPI filter
         </Button>
       )}
-    </Card>
+    </div>
   );
 }

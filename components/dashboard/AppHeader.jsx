@@ -13,33 +13,42 @@ export default function AppHeader({
   return (
     <header className="app-header">
       <div className="app-header-brand">
-        <div className="app-header-titles">
-          <h1>Needs Material Dashboard</h1>
-          <p>Purchasing Work Queue</p>
-        </div>
-      </div>
-      <nav className="app-header-nav" aria-label="Primary">
         <button
           type="button"
-          className={page === "dashboard" ? "active" : ""}
+          className="app-header-titles"
           onClick={() => setPage("dashboard")}
         >
-          Dashboard
+          <h1>Needs Material Dashboard</h1>
+          <p>Purchasing Work Queue</p>
         </button>
-        {canAdmin && (
+        <nav className="app-header-nav" aria-label="Primary">
           <button
             type="button"
-            className={page === "admin" ? "active" : ""}
-            onClick={() => setPage("admin")}
+            className={page === "dashboard" ? "active" : ""}
+            onClick={() => setPage("dashboard")}
           >
-            Administration
+            Dashboard
           </button>
-        )}
-        <button type="button" className="nav-link" onClick={onRefreshHistory}>
+          {canAdmin && (
+            <button
+              type="button"
+              className={page === "admin" ? "active" : ""}
+              onClick={() => setPage("admin")}
+            >
+              Administration
+            </button>
+          )}
+        </nav>
+      </div>
+
+      <div className="app-header-user">
+        <button
+          type="button"
+          className={`header-history-link${page === "history" ? " active" : ""}`}
+          onClick={onRefreshHistory}
+        >
           Refresh History
         </button>
-      </nav>
-      <div className="app-header-user">
         <div className="avatar" aria-hidden="true">
           {initials}
         </div>

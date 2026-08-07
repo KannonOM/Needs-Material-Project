@@ -15,6 +15,11 @@ import RefreshStatusPanel, { RUNNING_STEPS } from "../components/dashboard/Refre
 import ActiveOrdersBar from "../components/dashboard/ActiveOrdersBar";
 import SearchFilters from "../components/dashboard/SearchFilters";
 import WorkOrderTable from "../components/dashboard/WorkOrderTable";
+import RefreshHistoryPage from "../components/dashboard/RefreshHistoryPage";
+import SessionLoading from "../components/dashboard/SessionLoading";
+import SessionError from "../components/dashboard/SessionError";
+import LoadError from "../components/dashboard/LoadError";
+import Button from "../components/ui/Button";
 
 const MATERIAL_LINE_STATUSES=[
   "Not Ordered",
@@ -212,8 +217,20 @@ function parseRefreshMeta(data){
       activeDashboardCount:stats.activeDashboardCount
     }:null,
     durationLabel:stats?formatDurationMs(stats.durationMs):null,
-    errorMessage:stats?.errorMessage||""
+    errorMessage:stats?.errorMessage
+      ? friendlyError(stats.errorMessage,"Refresh failed. Please try again.")
+      :""
   };
+}
+
+function friendlyError(message,fallback="Something went wrong. Please try again."){
+  if(!message)return fallback;
+  const text=String(message).replace(/\s+/g," ").trim();
+  if(!text)return fallback;
+  if(/secret|token|password|api[_ -]?key|bearer |authorization|stack|supabase|ENOENT|ECONN/i.test(text)){
+    return fallback;
+  }
+  return text.length>220?`${text.slice(0,217)}…`:text;
 }
 
 export default function SundayPrototype(){
@@ -247,6 +264,11 @@ export default function SundayPrototype(){
   const [refreshDurationLabel,setRefreshDurationLabel]=useState(null);
   const [refreshError,setRefreshError]=useState("");
   const [runningStepIndex,setRunningStepIndex]=useState(0);
+  const [loadError,setLoadError]=useState("");
+  const [sessionTimedOut,setSessionTimedOut]=useState(false);
+  const [historyRows,setHistoryRows]=useState([]);
+  const [loadingHistory,setLoadingHistory]=useState(false);
+  const [historyError,setHistoryError]=useState("");
 
   const notify=msg=>{setToast(msg);setTimeout(()=>setToast(""),3200)};
 
@@ -268,6 +290,7 @@ export default function SundayPrototype(){
 
   async function loadRowsFromApi({silent=false}={}){
     if(!silent)setLoadingRows(true);
+    if(!silent)setLoadError("");
     try{
       const res=await fetch("/api/needs-material",{cache:"no-store"});
       const data=await res.json();
@@ -278,14 +301,41 @@ export default function SundayPrototype(){
       if(!res.ok)throw new Error(data.error||"Failed to load work orders");
       setRows((data.rows||[]).map(normalizeRow));
       applyParsedRefreshMeta(parseRefreshMeta(data));
+      setLoadError("");
       if(!silent)notify("Loaded work orders from Supabase.");
       return true;
     }catch(error){
       console.error(error);
-      notify(error.message||"Could not load work orders");
+      const message=friendlyError(error.message,"Could not load work orders");
+      if(!silent)setLoadError(message);
+      notify(message);
       return false;
     }finally{
       setLoadingRows(false);
+    }
+  }
+
+  async function loadRefreshHistory(){
+    setLoadingHistory(true);
+    setHistoryError("");
+    try{
+      const res=await fetch("/api/refresh/history",{cache:"no-store"});
+      const data=await res.json();
+      if(res.status===401){
+        await signOut({callbackUrl:"/"});
+        throw new Error("Session expired. Sign in again.");
+      }
+      if(!res.ok)throw new Error(data.error||"Failed to load refresh history");
+      setHistoryRows(data.rows||[]);
+      return true;
+    }catch(error){
+      console.error(error);
+      const message=friendlyError(error.message,"Could not load refresh history");
+      setHistoryError(message);
+      notify(message);
+      return false;
+    }finally{
+      setLoadingHistory(false);
     }
   }
 
@@ -315,11 +365,13 @@ export default function SundayPrototype(){
       });
       setRefreshDurationLabel(formatDurationMs(Date.now()-started));
       setRefreshStatus("success");
+      setRefreshError("");
       notify(`Refresh complete: ${stats.distinctWorkOrders??0} WO, ${stats.inserted??0} new, ${stats.updated??0} updated, ${stats.archived??0} archived`);
       await loadRowsFromApi({silent:true});
+      if(page==="history")await loadRefreshHistory();
     }catch(error){
       console.error(error);
-      const message=error.message||"SharePoint refresh failed";
+      const message=friendlyError(error.message,"SharePoint refresh failed");
       setRefreshStatus("failed");
       setRefreshError(message);
       setRefreshDurationLabel(formatDurationMs(Date.now()-started));
@@ -331,10 +383,20 @@ export default function SundayPrototype(){
   }
 
   useEffect(()=>{
+    if(sessionStatus!=="loading"){
+      setSessionTimedOut(false);
+      return;
+    }
+    const timer=setTimeout(()=>setSessionTimedOut(true),5000);
+    return()=>clearTimeout(timer);
+  },[sessionStatus]);
+
+  useEffect(()=>{
     if(!signedIn)return;
     let cancelled=false;
     (async()=>{
       setLoadingRows(true);
+      setLoadError("");
       try{
         const res=await fetch("/api/needs-material",{cache:"no-store"});
         const data=await res.json();
@@ -350,15 +412,44 @@ export default function SundayPrototype(){
           setRefreshDurationLabel(meta.durationLabel);
           setRefreshError(meta.errorMessage||"");
         }
+        setLoadError("");
       }catch(error){
         console.error(error);
-        if(!cancelled)notify(error.message||"Could not load work orders");
+        if(!cancelled){
+          const message=friendlyError(error.message,"Could not load work orders");
+          setLoadError(message);
+          notify(message);
+        }
       }finally{
         if(!cancelled)setLoadingRows(false);
       }
     })();
     return()=>{cancelled=true};
   },[signedIn]);
+
+  useEffect(()=>{
+    if(!(signedIn&&page==="history"))return;
+    let cancelled=false;
+    (async()=>{
+      setLoadingHistory(true);
+      setHistoryError("");
+      try{
+        const res=await fetch("/api/refresh/history",{cache:"no-store"});
+        const data=await res.json();
+        if(!res.ok)throw new Error(data.error||"Failed to load refresh history");
+        if(!cancelled)setHistoryRows(data.rows||[]);
+      }catch(error){
+        console.error(error);
+        if(!cancelled){
+          const message=friendlyError(error.message,"Could not load refresh history");
+          setHistoryError(message);
+        }
+      }finally{
+        if(!cancelled)setLoadingHistory(false);
+      }
+    })();
+    return()=>{cancelled=true};
+  },[signedIn,page]);
 
   useEffect(()=>{
     if(!refreshing){
@@ -535,7 +626,13 @@ export default function SundayPrototype(){
   };
 
   if(sessionStatus==="loading"){
-    return <div className="login"><section className="login-panel"><div className="login-card"><h2>Checking session…</h2></div></section></div>;
+    if(sessionTimedOut){
+      return <SessionError
+        onRetry={()=>{setSessionTimedOut(false);window.location.reload();}}
+        onSignIn={()=>signIn("microsoft-entra-id")}
+      />;
+    }
+    return <SessionLoading/>;
   }
 
   if(!signedIn)return <Login onSignIn={()=>signIn("microsoft-entra-id")}/>;
@@ -554,41 +651,55 @@ export default function SundayPrototype(){
       userRoleLabel={userRoleLabel}
       initials={initialsFromName(userName)}
       onSignOut={()=>signOut({callbackUrl:"/"})}
-      onRefreshHistory={()=>{
-        setPage("dashboard");
-        requestAnimationFrame(()=>{
-          document.getElementById("refresh-panel")?.scrollIntoView({behavior:"smooth",block:"start"});
-        });
-      }}
+      onRefreshHistory={()=>setPage("history")}
     />
     <main className="content">
-      {page==="dashboard"?
-        <Dashboard
-          kpis={kpis}
-          kpiFilter={kpiFilter}
-          setKpiFilter={setKpiFilter}
-          search={search}
-          setSearch={setSearch}
-          visibleRows={visibleRows}
-          activeCount={activeRows.length}
-          sortKey={sortKey}
-          sortDir={sortDir}
-          onSort={toggleSort}
-          lastRefresh={lastRefresh}
-          sourceFilename={sourceFilename}
-          loadingRows={loadingRows||refreshing}
-          refreshing={refreshing}
-          refreshStatus={refreshStatus}
-          refreshStats={refreshStats}
-          refreshDurationLabel={refreshDurationLabel}
-          refreshError={refreshError}
-          runningStepIndex={runningStepIndex}
-          panelActiveCount={panelActiveCount}
-          canEdit={canEdit}
-          canRefresh={canRefresh}
-          refresh={refreshFromSharePoint}
-          onEdit={row=>setEdit(normalizeRow({...row,material_lines:(row.material_lines||[]).map(l=>({...l}))}))}
-        />:
+      {page==="dashboard"&&(
+        loadError&&!rows.length&&!loadingRows?
+          <LoadError
+            title="Could not load work orders"
+            message={loadError}
+            onRetry={()=>loadRowsFromApi()}
+          />:
+          <Dashboard
+            kpis={kpis}
+            kpiFilter={kpiFilter}
+            setKpiFilter={setKpiFilter}
+            search={search}
+            setSearch={setSearch}
+            visibleRows={visibleRows}
+            activeCount={activeRows.length}
+            sortKey={sortKey}
+            sortDir={sortDir}
+            onSort={toggleSort}
+            lastRefresh={lastRefresh}
+            sourceFilename={sourceFilename}
+            loadingRows={loadingRows||refreshing}
+            refreshing={refreshing}
+            refreshStatus={refreshStatus}
+            refreshStats={refreshStats}
+            refreshDurationLabel={refreshDurationLabel}
+            refreshError={refreshError}
+            runningStepIndex={runningStepIndex}
+            panelActiveCount={panelActiveCount}
+            loadError={loadError}
+            onRetryLoad={()=>loadRowsFromApi()}
+            canEdit={canEdit}
+            canRefresh={canRefresh}
+            refresh={refreshFromSharePoint}
+            onEdit={row=>setEdit(normalizeRow({...row,material_lines:(row.material_lines||[]).map(l=>({...l}))}))}
+          />
+      )}
+      {page==="history"&&(
+        <RefreshHistoryPage
+          rows={historyRows}
+          loading={loadingHistory}
+          error={historyError}
+          onRetry={loadRefreshHistory}
+          onBack={()=>setPage("dashboard")}
+        />
+      )}
+      {page==="admin"&&(
         <Admin
           users={users}
           loading={loadingUsers}
@@ -596,7 +707,7 @@ export default function SundayPrototype(){
           onToggle={toggleUserStatus}
           onRemove={removeUser}
         />
-      }
+      )}
     </main>
     {edit&&<EditModal
       row={edit}
@@ -664,12 +775,22 @@ function Dashboard({
   refreshError,
   runningStepIndex,
   panelActiveCount,
+  loadError,
+  onRetryLoad,
   refresh,
   onEdit,
   canEdit,
   canRefresh
 }){
   return <section className="dashboard-stack">
+    {loadError&&(
+      <LoadError
+        title="Dashboard data may be out of date"
+        message={loadError}
+        onRetry={onRetryLoad}
+      />
+    )}
+
     <div className="metric-cards">
       {kpis.map(card=>(
         <MetricCard
@@ -780,30 +901,38 @@ function EditModal({row,onClose,onSave,saving,readOnly=false}){
   };
   return <div className="modal-back">
     <div className="modal modal-wide">
-      <div className="modal-head"><h2>{readOnly?"View":"Edit"} {row.work_order}</h2><button className="x" onClick={onClose} disabled={saving}>×</button></div>
-      <div className="modal-body">
-        <div className="field readonly-field">
-          <label>Customer PO</label>
-          <input value={v.customer_po||""} readOnly disabled/>
+      <div className="modal-head">
+        <div>
+          <h2>{readOnly?"View":"Edit"} {row.work_order}</h2>
+          <p className="modal-subtitle">{row.customer||"Work order details"}</p>
         </div>
-        <div className="field">
-          <label>Owner</label>
-          <select value={v.owner} onChange={e=>setV({...v,owner:e.target.value})} disabled={locked}>
-            <option>Chris Vieux</option>
-            <option>Buyer 1</option>
-            <option>Unassigned</option>
-          </select>
+        <button className="x" onClick={onClose} disabled={saving} aria-label="Close">×</button>
+      </div>
+      <div className="modal-body">
+        <div className="edit-grid">
+          <div className="field readonly-field">
+            <label>Customer PO</label>
+            <input value={v.customer_po||""} readOnly disabled/>
+          </div>
+          <div className="field">
+            <label>Owner</label>
+            <select value={v.owner} onChange={e=>setV({...v,owner:e.target.value})} disabled={locked}>
+              <option>Chris Vieux</option>
+              <option>Buyer 1</option>
+              <option>Unassigned</option>
+            </select>
+          </div>
         </div>
         <div className="field">
           <label>Notes</label>
-          <textarea value={v.follow_up_notes} onChange={e=>setV({...v,follow_up_notes:e.target.value})} disabled={locked}/>
+          <textarea value={v.follow_up_notes} onChange={e=>setV({...v,follow_up_notes:e.target.value})} disabled={locked} placeholder={readOnly?"":"Follow-up notes for purchasing"}/>
         </div>
         <MaterialSection title="Flats" lines={flats} onAdd={()=>addLine("Flats")} onChange={updateLine} onRemove={removeLine} disabled={locked} readOnly={readOnly}/>
         <MaterialSection title="Shapes" lines={shapes} onAdd={()=>addLine("Shapes")} onChange={updateLine} onRemove={removeLine} disabled={locked} readOnly={readOnly}/>
       </div>
       <div className="modal-foot">
-        <button className="btn" onClick={onClose} disabled={saving}>{readOnly?"Close":"Cancel"}</button>
-        {!readOnly&&<button className="btn primary" onClick={()=>onSave(v)} disabled={saving}>{saving?"Saving…":"Save"}</button>}
+        <Button onClick={onClose} disabled={saving}>{readOnly?"Close":"Cancel"}</Button>
+        {!readOnly&&<Button variant="primary" onClick={()=>onSave(v)} disabled={saving}>{saving?"Saving…":"Save changes"}</Button>}
       </div>
     </div>
   </div>;
@@ -813,7 +942,7 @@ function MaterialSection({title,lines,onAdd,onChange,onRemove,disabled,readOnly=
   return <div className="material-section">
     <div className="material-section-head">
       <h3>{title}</h3>
-      {!readOnly&&<button type="button" className="btn" onClick={onAdd} disabled={disabled}>+ Add {title} Material</button>}
+      {!readOnly&&<Button type="button" onClick={onAdd} disabled={disabled}>+ Add {title} Material</Button>}
     </div>
     {lines.length===0?<p className="material-empty">No {title.toLowerCase()} material lines yet.</p>:
       lines.map(line=><div className="material-line" key={line.id}>
@@ -830,7 +959,7 @@ function MaterialSection({title,lines,onAdd,onChange,onRemove,disabled,readOnly=
           </div>
         </div>
         {!readOnly&&<div className="material-line-actions">
-          <button type="button" className="btn danger" onClick={()=>onRemove(line.id)} disabled={disabled}>Remove</button>
+          <Button type="button" variant="danger" onClick={()=>onRemove(line.id)} disabled={disabled}>Remove</Button>
         </div>}
       </div>)}
   </div>;
