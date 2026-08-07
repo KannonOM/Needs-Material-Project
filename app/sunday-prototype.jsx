@@ -11,7 +11,7 @@ import {
 } from "../lib/auth/permissions";
 import AppHeader from "../components/dashboard/AppHeader";
 import MetricCard from "../components/dashboard/MetricCard";
-import RefreshStatusPanel, { RUNNING_STEPS } from "../components/dashboard/RefreshStatusPanel";
+import RefreshStatusPanel from "../components/dashboard/RefreshStatusPanel";
 import ActiveOrdersBar from "../components/dashboard/ActiveOrdersBar";
 import SearchFilters from "../components/dashboard/SearchFilters";
 import WorkOrderTable from "../components/dashboard/WorkOrderTable";
@@ -34,15 +34,17 @@ const MATERIAL_LINE_STATUSES=[
 const DEFAULT_MATERIAL_LINE_STATUS="Not Ordered";
 
 const TABLE_COLUMNS=[
-  {key:"work_order",label:"WO"},
-  {key:"customer_po",label:"Customer PO"},
-  {key:"customer",label:"Customer"},
-  {key:"due_date",label:"Due Date"},
-  {key:"part_number",label:"Part Number"},
-  {key:"quantity",label:"Qty"},
-  {key:"flats",label:"Flats"},
-  {key:"shapes",label:"Shapes"},
-  {key:"owner",label:"Owner"}
+  {key:"work_order",label:"WO",sortable:true},
+  {key:"customer_po",label:"Customer PO",sortable:true},
+  {key:"customer",label:"Customer",sortable:true},
+  {key:"due_date",label:"Due Date",sortable:true},
+  {key:"days_to_ship",label:"Days to Ship",sortable:true},
+  {key:"part_number",label:"Part Number",sortable:true},
+  {key:"description",label:"Description",sortable:false},
+  {key:"quantity",label:"Qty",sortable:true},
+  {key:"flats",label:"Flats",sortable:false},
+  {key:"shapes",label:"Shapes",sortable:false},
+  {key:"owner",label:"Owner",sortable:true}
 ];
 
 function todayYmd(){
@@ -60,6 +62,20 @@ function daysUntilDue(dueDate){
   const a=new Date(`${today}T12:00:00`);
   const b=new Date(`${dueDate}T12:00:00`);
   return Math.ceil((b-a)/86400000);
+}
+
+function daysToShipInfo(dueDate){
+  const days=daysUntilDue(dueDate);
+  if(days===null)return{days:null,tone:"neutral",label:"—"};
+  if(days<0)return{days,tone:"overdue",label:"Overdue"};
+  if(days<=7)return{days,tone:"week",label:"Due This Week"};
+  if(days<=14)return{days,tone:"soon",label:"Due Soon"};
+  return{days,tone:"track",label:"On Track"};
+}
+
+function isUnassignedOwner(owner){
+  const value=String(owner||"").trim().toLowerCase();
+  return!value||value==="unassigned";
 }
 
 function normalizeMaterialStatus(status,legacyHeaderStatus){
@@ -176,6 +192,14 @@ function newMaterialLine(category){
 }
 
 function compareValues(a,b,key){
+  if(key==="days_to_ship"){
+    const ad=daysUntilDue(a.due_date);
+    const bd=daysUntilDue(b.due_date);
+    if(ad===null&&bd===null)return 0;
+    if(ad===null)return 1;
+    if(bd===null)return -1;
+    return ad-bd;
+  }
   if(key==="flats")return categorySummary(a,"Flats").localeCompare(categorySummary(b,"Flats"));
   if(key==="shapes")return categorySummary(a,"Shapes").localeCompare(categorySummary(b,"Shapes"));
   if(key==="quantity")return(Number(a.quantity)||0)-(Number(b.quantity)||0);
@@ -263,7 +287,7 @@ export default function SundayPrototype(){
   const [refreshStats,setRefreshStats]=useState(null);
   const [refreshDurationLabel,setRefreshDurationLabel]=useState(null);
   const [refreshError,setRefreshError]=useState("");
-  const [runningStepIndex,setRunningStepIndex]=useState(0);
+  const [refreshStartedAt,setRefreshStartedAt]=useState(null);
   const [loadError,setLoadError]=useState("");
   const [sessionTimedOut,setSessionTimedOut]=useState(false);
   const [historyRows,setHistoryRows]=useState([]);
@@ -343,8 +367,8 @@ export default function SundayPrototype(){
     if(refreshing)return;
     setRefreshing(true);
     setRefreshError("");
-    setRunningStepIndex(0);
     const started=Date.now();
+    setRefreshStartedAt(started);
     setLoadingRows(true);
     try{
       const res=await fetch("/api/refresh",{method:"POST"});
@@ -379,6 +403,7 @@ export default function SundayPrototype(){
       setLoadingRows(false);
     }finally{
       setRefreshing(false);
+      setRefreshStartedAt(null);
     }
   }
 
@@ -450,18 +475,6 @@ export default function SundayPrototype(){
     })();
     return()=>{cancelled=true};
   },[signedIn,page]);
-
-  useEffect(()=>{
-    if(!refreshing){
-      setRunningStepIndex(0);
-      return;
-    }
-    setRunningStepIndex(0);
-    const id=setInterval(()=>{
-      setRunningStepIndex(i=>Math.min(i+1,RUNNING_STEPS.length-1));
-    },1400);
-    return()=>clearInterval(id);
-  },[refreshing]);
 
   useEffect(()=>{
     if(!(signedIn&&canAdmin&&page==="admin"))return;
@@ -596,17 +609,22 @@ export default function SundayPrototype(){
     const q=search.trim().toLowerCase();
     let list=activeRows.filter(r=>{
       if(kpiFilter==="overdue_ead"||kpiFilter==="late_suppliers")return hasLateLines(r);
+      if(kpiFilter==="overdue_ship"){
+        const d=daysUntilDue(r.due_date);
+        return d!==null&&d<0;
+      }
       if(kpiFilter==="due_this_week"){
         const d=daysUntilDue(r.due_date);
         return d!==null&&d>=0&&d<=7;
       }
       if(kpiFilter==="waiting_quote")return materialLines(r).some(l=>l.status==="Quote Requested");
+      if(kpiFilter==="unassigned")return isUnassignedOwner(r.owner);
       return true;
     });
     if(q){
       list=list.filter(r=>{
         const hay=[
-          r.work_order,r.customer_po,r.customer,r.due_date,r.part_number,r.quantity,
+          r.work_order,r.customer_po,r.customer,r.due_date,r.part_number,r.description,r.quantity,
           r.owner,r.follow_up_notes,categorySummary(r,"Flats"),categorySummary(r,"Shapes"),
           ...materialLines(r).flatMap(l=>[l.material_type,l.supplier,l.material_po,l.ead,l.status])
         ].join(" ").toLowerCase();
@@ -622,7 +640,10 @@ export default function SundayPrototype(){
 
   const toggleSort=key=>{
     if(sortKey===key)setSortDir(d=>d==="asc"?"desc":"asc");
-    else{setSortKey(key);setSortDir(key==="due_date"?"asc":"asc");}
+    else{
+      setSortKey(key);
+      setSortDir(key==="due_date"||key==="days_to_ship"?"asc":"asc");
+    }
   };
 
   if(sessionStatus==="loading"){
@@ -680,7 +701,7 @@ export default function SundayPrototype(){
             refreshStats={refreshStats}
             refreshDurationLabel={refreshDurationLabel}
             refreshError={refreshError}
-            runningStepIndex={runningStepIndex}
+            refreshStartedAt={refreshStartedAt}
             panelActiveCount={panelActiveCount}
             loadError={loadError}
             onRetryLoad={()=>loadRowsFromApi()}
@@ -773,7 +794,7 @@ function Dashboard({
   refreshStats,
   refreshDurationLabel,
   refreshError,
-  runningStepIndex,
+  refreshStartedAt,
   panelActiveCount,
   loadError,
   onRetryLoad,
@@ -814,7 +835,7 @@ function Dashboard({
       errorMessage={refreshError}
       canRefresh={canRefresh}
       refreshing={refreshing}
-      runningStepIndex={runningStepIndex}
+      refreshStartedAt={refreshStartedAt}
       onRefresh={refresh}
     />
 
@@ -837,6 +858,7 @@ function Dashboard({
       canEdit={canEdit}
       onEdit={onEdit}
       categorySummary={categorySummary}
+      daysToShipInfo={daysToShipInfo}
     />
   </section>;
 }
