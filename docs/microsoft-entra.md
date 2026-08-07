@@ -67,7 +67,7 @@ After Microsoft authentication succeeds, the Microsoft email is trimmed and lowe
 
 Roles: `administrator`, `purchasing`, `scheduler`, `viewer`.
 
-Primary administrator seed: **Chris Vieux** (`cvieux@kannonmfg.com` once seed email is replaced in Supabase).
+Primary administrator seed: **Chris Vieux** (`chris.vieux@kannonmfg.com`).
 
 ## What this app does **not** use Entra for
 

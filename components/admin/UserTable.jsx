@@ -11,9 +11,12 @@ export default function UserTable({
   users,
   loading,
   currentUserEmail,
+  inviteEmailConfigured = false,
   onEdit,
   onActivate,
   onDeactivate,
+  onResendInvite,
+  onCopySignInLink,
 }) {
   return (
     <Card className="table-panel admin-users-panel">
@@ -31,6 +34,7 @@ export default function UserTable({
               <th>Status</th>
               <th>Invited</th>
               <th>Accepted</th>
+              <th>Last Sign-In</th>
               <th>Last Updated</th>
               <th>Actions</th>
             </tr>
@@ -38,7 +42,7 @@ export default function UserTable({
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan="8" className="empty">
+                <td colSpan="9" className="empty">
                   Loading users…
                 </td>
               </tr>
@@ -47,6 +51,9 @@ export default function UserTable({
                 const isSelf =
                   String(user.email || "").toLowerCase() ===
                   String(currentUserEmail || "").toLowerCase();
+                const isInvited = user.statusKey === "pending";
+                const isActive = user.statusKey === "active";
+                const isInactive = user.statusKey === "disabled";
                 return (
                   <tr key={user.id}>
                     <td>
@@ -64,12 +71,48 @@ export default function UserTable({
                     </td>
                     <td>{user.invitedLabel}</td>
                     <td>{user.acceptedLabel}</td>
+                    <td>{user.lastSignInLabel || "—"}</td>
                     <td>{user.updatedLabel}</td>
                     <td className="admin-actions">
                       <Button className="edit-btn" onClick={() => onEdit(user)}>
                         Edit
                       </Button>
-                      {user.statusKey === "active" ? (
+                      {isInvited && (
+                        <>
+                          <Button
+                            className="edit-btn"
+                            onClick={() => onResendInvite(user)}
+                            disabled={!inviteEmailConfigured}
+                            title={
+                              inviteEmailConfigured
+                                ? "Resend invitation email"
+                                : "Email is not configured (RESEND_API_KEY / INVITE_FROM_EMAIL)"
+                            }
+                          >
+                            Resend Invite
+                          </Button>
+                          <Button
+                            className="edit-btn"
+                            onClick={() => onCopySignInLink(user)}
+                            title="Copy dashboard sign-in link"
+                          >
+                            Copy Sign-In Link
+                          </Button>
+                          <Button
+                            className="edit-btn"
+                            onClick={() => onDeactivate(user)}
+                            disabled={isSelf}
+                            title={
+                              isSelf
+                                ? "You cannot deactivate your own account"
+                                : "Deactivate invited user"
+                            }
+                          >
+                            Deactivate
+                          </Button>
+                        </>
+                      )}
+                      {isActive && (
                         <Button
                           className="edit-btn"
                           onClick={() => onDeactivate(user)}
@@ -82,7 +125,8 @@ export default function UserTable({
                         >
                           Deactivate
                         </Button>
-                      ) : (
+                      )}
+                      {isInactive && (
                         <Button
                           className="edit-btn"
                           variant="primary"
@@ -97,7 +141,7 @@ export default function UserTable({
               })
             ) : (
               <tr>
-                <td colSpan="8" className="empty">
+                <td colSpan="9" className="empty">
                   No users match the current filters.
                 </td>
               </tr>

@@ -19,6 +19,7 @@ export default auth((req) => {
     }
     const denied = req.nextUrl.clone();
     denied.pathname = "/access-denied";
+    denied.searchParams.set("reason", session?.denyReason || "not_allowed");
     return NextResponse.redirect(denied);
   }
 

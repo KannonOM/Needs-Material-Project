@@ -9,11 +9,53 @@ import {
   normalizeStatus,
   parseAssignableRole,
 } from "../../../lib/auth/user-labels";
+import {
+  getAppBaseUrl,
+  isInviteEmailConfigured,
+  sendInviteEmail,
+} from "../../../lib/email/invite";
 
 export const dynamic = "force-dynamic";
 
-const SELECT_FIELDS =
+const SELECT_FIELDS_BASE =
   "id, email, full_name, role, status, invited_at, accepted_at, created_at, updated_at, disabled_at";
+const SELECT_FIELDS_WITH_SIGN_IN = `${SELECT_FIELDS_BASE}, last_sign_in_at`;
+
+async function selectAllowedUsers(supabase) {
+  const withSignIn = await supabase
+    .from("allowed_users")
+    .select(SELECT_FIELDS_WITH_SIGN_IN)
+    .order("full_name", { ascending: true });
+
+  if (!withSignIn.error) return withSignIn;
+
+  if (/last_sign_in_at/i.test(withSignIn.error.message || "")) {
+    return supabase
+      .from("allowed_users")
+      .select(SELECT_FIELDS_BASE)
+      .order("full_name", { ascending: true });
+  }
+  return withSignIn;
+}
+
+async function selectAllowedUserById(supabase, id) {
+  const withSignIn = await supabase
+    .from("allowed_users")
+    .select(SELECT_FIELDS_WITH_SIGN_IN)
+    .eq("id", id)
+    .single();
+
+  if (!withSignIn.error) return withSignIn;
+
+  if (/last_sign_in_at/i.test(withSignIn.error.message || "")) {
+    return supabase
+      .from("allowed_users")
+      .select(SELECT_FIELDS_BASE)
+      .eq("id", id)
+      .single();
+  }
+  return withSignIn;
+}
 
 export async function GET() {
   const { error: authError } = await requireAdministrator();
@@ -21,13 +63,14 @@ export async function GET() {
 
   try {
     const supabase = getSupabaseAdmin();
-    const { data, error } = await supabase
-      .from("allowed_users")
-      .select(SELECT_FIELDS)
-      .order("full_name", { ascending: true });
-
+    const { data, error } = await selectAllowedUsers(supabase);
     if (error) throw error;
-    return Response.json({ users: (data || []).map(mapAllowedUser) });
+
+    return Response.json({
+      users: (data || []).map(mapAllowedUser),
+      inviteEmailConfigured: isInviteEmailConfigured(),
+      signInUrl: getAppBaseUrl(),
+    });
   } catch (error) {
     console.error("GET /api/allowed-users failed", error);
     return Response.json(
@@ -69,7 +112,7 @@ export async function POST(request) {
 
     const now = new Date().toISOString();
     const supabase = getSupabaseAdmin();
-    const { data, error } = await supabase
+    const { data: created, error } = await supabase
       .from("allowed_users")
       .insert({
         email,
@@ -80,7 +123,7 @@ export async function POST(request) {
         disabled_at: status === STATUS.INACTIVE ? now : null,
         created_by: user.id,
       })
-      .select(SELECT_FIELDS)
+      .select(SELECT_FIELDS_BASE)
       .single();
 
     if (error) {
@@ -97,15 +140,37 @@ export async function POST(request) {
       user_id: user.id,
       action: "invite_user",
       record_type: "allowed_users",
-      record_id: data.id,
+      record_id: created.id,
       field_name: "status",
       old_value: null,
       new_value: status,
     });
 
+    const { data } = await selectAllowedUserById(supabase, created.id);
+    const mapped = mapAllowedUser(data || created);
+
+    let emailResult = { sent: false, reason: null };
+    if (status === STATUS.INVITED) {
+      emailResult = await sendInviteEmail({
+        to: email,
+        fullName,
+        role,
+      });
+    }
+
+    let note = `${mapped.name} added to the allowlist.`;
+    if (status === STATUS.INVITED) {
+      note = emailResult.sent
+        ? `${mapped.name} added and invitation email sent.`
+        : `${mapped.name} added. ${emailResult.reason || "Invitation email was not sent."}`;
+    }
+
     return Response.json({
-      user: mapAllowedUser(data),
-      note: "User created on the allowlist. Invitation email delivery is not wired yet.",
+      user: mapped,
+      note,
+      email: emailResult,
+      inviteEmailConfigured: isInviteEmailConfigured(),
+      signInUrl: getAppBaseUrl(),
     });
   } catch (error) {
     console.error("POST /api/allowed-users failed", error);

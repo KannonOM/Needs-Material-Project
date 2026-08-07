@@ -293,6 +293,8 @@ export default function SundayPrototype(){
   const [savingEdit,setSavingEdit]=useState(false);
   const [users,setUsers]=useState([]);
   const [loadingUsers,setLoadingUsers]=useState(false);
+  const [inviteEmailConfigured,setInviteEmailConfigured]=useState(false);
+  const [signInUrl,setSignInUrl]=useState("http://localhost:3000");
   const [search,setSearch]=useState("");
   const [kpiFilter,setKpiFilter]=useState("all");
   const [sortKey,setSortKey]=useState("due_date");
@@ -505,7 +507,11 @@ export default function SundayPrototype(){
         const res=await fetch("/api/allowed-users",{cache:"no-store"});
         const data=await res.json();
         if(!res.ok)throw new Error(data.error||"Failed to load users");
-        if(!cancelled)setUsers(data.users||[]);
+        if(!cancelled){
+          setUsers(data.users||[]);
+          setInviteEmailConfigured(Boolean(data.inviteEmailConfigured));
+          if(data.signInUrl)setSignInUrl(data.signInUrl);
+        }
       }catch(error){
         console.error(error);
         if(!cancelled)notify(error.message||"Could not load allowlist users");
@@ -577,6 +583,10 @@ export default function SundayPrototype(){
     const data=await res.json();
     if(!res.ok)throw new Error(data.error||"Could not create user");
     setUsers(prev=>[...prev,data.user].sort((a,b)=>a.name.localeCompare(b.name)));
+    if(typeof data.inviteEmailConfigured==="boolean"){
+      setInviteEmailConfigured(data.inviteEmailConfigured);
+    }
+    if(data.signInUrl)setSignInUrl(data.signInUrl);
     await loadOwnerOptions();
     notify(data.note||`${data.user.name} added`);
     return data.user;
@@ -636,6 +646,32 @@ export default function SundayPrototype(){
     }catch(error){
       console.error(error);
       notify(error.message||"Deactivate failed");
+    }
+  }
+
+  async function resendInvite(user){
+    try{
+      const res=await fetch(`/api/allowed-users/${user.id}/resend-invite`,{method:"POST"});
+      const data=await res.json();
+      if(typeof data.inviteEmailConfigured==="boolean"){
+        setInviteEmailConfigured(data.inviteEmailConfigured);
+      }
+      if(data.signInUrl)setSignInUrl(data.signInUrl);
+      if(!res.ok)throw new Error(data.error||"Could not resend invitation");
+      if(data.user)setUsers(prev=>prev.map(u=>u.id===data.user.id?data.user:u));
+      notify(data.note||`Invitation resent to ${user.email}`);
+    }catch(error){
+      console.error(error);
+      notify(error.message||"Resend invite failed");
+    }
+  }
+
+  async function copySignInLink(){
+    try{
+      await navigator.clipboard.writeText(signInUrl);
+      notify("Sign-in link copied");
+    }catch{
+      window.prompt("Copy this sign-in link:",signInUrl);
     }
   }
 
@@ -781,10 +817,13 @@ export default function SundayPrototype(){
             users={users}
             loading={loadingUsers}
             currentUserEmail={session?.user?.email||""}
+            inviteEmailConfigured={inviteEmailConfigured}
             onCreate={createUser}
             onUpdate={updateUser}
             onActivate={activateUser}
             onDeactivate={deactivateUser}
+            onResendInvite={resendInvite}
+            onCopySignInLink={copySignInLink}
           />:
           <LoadError
             title="Administration access denied"

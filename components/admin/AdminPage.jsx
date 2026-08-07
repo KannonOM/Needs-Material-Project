@@ -10,10 +10,13 @@ export default function AdminPage({
   users,
   loading,
   currentUserEmail,
+  inviteEmailConfigured = false,
   onCreate,
   onUpdate,
   onActivate,
   onDeactivate,
+  onResendInvite,
+  onCopySignInLink,
 }) {
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
@@ -64,6 +67,12 @@ export default function AdminPage({
         <div>
           <h1>Administration</h1>
           <p>Manage dashboard access and purchasing users</p>
+          {!inviteEmailConfigured && (
+            <p className="admin-email-note">
+              Invitation email is not configured. Use Copy Sign-In Link, or set
+              RESEND_API_KEY and INVITE_FROM_EMAIL.
+            </p>
+          )}
         </div>
         <div className="actions">
           <Button variant="primary" onClick={() => setModal({ mode: "create" })}>
@@ -114,9 +123,12 @@ export default function AdminPage({
         users={visibleUsers}
         loading={loading}
         currentUserEmail={currentUserEmail}
+        inviteEmailConfigured={inviteEmailConfigured}
         onEdit={(user) => setModal({ mode: "edit", user })}
         onActivate={onActivate}
         onDeactivate={onDeactivate}
+        onResendInvite={onResendInvite}
+        onCopySignInLink={onCopySignInLink}
       />
 
       {modal && (

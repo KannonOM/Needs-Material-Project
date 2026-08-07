@@ -12,9 +12,27 @@ import { isUuid } from "../../../../lib/needs-material/map";
 
 export const dynamic = "force-dynamic";
 
-const PRIMARY_ADMIN_EMAIL = "cvieux@kannonmfg.com";
-const SELECT_FIELDS =
+const PRIMARY_ADMIN_EMAIL = "chris.vieux@kannonmfg.com";
+const SELECT_FIELDS_BASE =
   "id, email, full_name, role, status, invited_at, accepted_at, created_at, updated_at, disabled_at";
+const SELECT_FIELDS = `${SELECT_FIELDS_BASE}, last_sign_in_at`;
+
+async function selectUserById(supabase, id) {
+  const withSignIn = await supabase
+    .from("allowed_users")
+    .select(SELECT_FIELDS)
+    .eq("id", id)
+    .single();
+  if (!withSignIn.error) return withSignIn;
+  if (/last_sign_in_at/i.test(withSignIn.error.message || "")) {
+    return supabase
+      .from("allowed_users")
+      .select(SELECT_FIELDS_BASE)
+      .eq("id", id)
+      .single();
+  }
+  return withSignIn;
+}
 
 function isPrimaryAdmin(email) {
   return normalizeEmail(email) === PRIMARY_ADMIN_EMAIL;
@@ -168,7 +186,7 @@ export async function PATCH(request, context) {
         patch.role = role;
         audits.push({
           user_id: user.id,
-          action: "update_field",
+          action: "change_role",
           record_type: "allowed_users",
           record_id: id,
           field_name: "role",
@@ -182,18 +200,19 @@ export async function PATCH(request, context) {
       return Response.json({ user: mapAllowedUser(existing) });
     }
 
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from("allowed_users")
       .update(patch)
-      .eq("id", id)
-      .select(SELECT_FIELDS)
-      .single();
+      .eq("id", id);
     if (error) throw error;
 
     if (audits.length) {
       const { error: auditError } = await supabase.from("audit_log").insert(audits);
       if (auditError) throw auditError;
     }
+
+    const { data, error: reloadError } = await selectUserById(supabase, id);
+    if (reloadError) throw reloadError;
 
     return Response.json({ user: mapAllowedUser(data) });
   } catch (error) {

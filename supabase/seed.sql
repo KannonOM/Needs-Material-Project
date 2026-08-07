@@ -3,7 +3,7 @@
 -- Before running:
 -- 1. Apply supabase/migrations/001_init.sql
 -- 2. Replace CHRIS_KANNON_EMAIL_REPLACE_ME with Chris Vieux's real Kannon email
---    (example: cvieux@kannonmfg.com)
+--    (example: chris.vieux@kannonmfg.com)
 -- 3. Run this file once in the Supabase SQL Editor (or via supabase db reset / seed)
 --
 -- This seed does not insert sample Needs Material rows. The app continues to use

@@ -1,10 +1,13 @@
 import NextAuth from "next-auth";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 import {
+  completeSuccessfulSignIn,
   findActiveAllowedUser,
-  markAllowedUserAccepted,
+  findAllowedUserByEmail,
+  findSignInAllowedUser,
   normalizeEmail,
 } from "./lib/auth/allowlist";
+import { STATUS } from "./lib/auth/user-labels";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   trustHost: true,
@@ -23,13 +26,22 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async signIn({ user, profile }) {
       try {
         const email = normalizeEmail(user?.email || profile?.email);
-        const allowed = await findActiveAllowedUser(email);
-        if (!allowed) return "/access-denied";
-        await markAllowedUserAccepted(allowed.id);
+        if (!email) return "/access-denied?reason=not_allowed";
+
+        const allowed = await findSignInAllowedUser(email);
+        if (!allowed) {
+          const existing = await findAllowedUserByEmail(email);
+          if (existing?.status === STATUS.INACTIVE) {
+            return "/access-denied?reason=inactive";
+          }
+          return "/access-denied?reason=not_allowed";
+        }
+
+        await completeSuccessfulSignIn(allowed);
         return true;
       } catch (error) {
         console.error("Allowlist sign-in check failed", error);
-        return "/access-denied";
+        return "/access-denied?reason=error";
       }
     },
     async jwt({ token, user, profile, trigger }) {
@@ -52,7 +64,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       try {
         const allowed = await findActiveAllowedUser(email);
         if (!allowed) {
+          const existing = await findAllowedUserByEmail(email);
           token.allowlistDenied = true;
+          token.denyReason =
+            existing?.status === STATUS.INACTIVE ? "inactive" : "not_allowed";
           token.role = null;
           token.allowlistId = null;
           token.fullName = null;
@@ -60,6 +75,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return token;
         }
         token.allowlistDenied = false;
+        token.denyReason = null;
         token.email = allowed.email;
         token.role = allowed.role;
         token.allowlistId = allowed.id;
@@ -68,6 +84,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       } catch (error) {
         console.error("Allowlist JWT enrichment failed", error);
         token.allowlistDenied = true;
+        token.denyReason = "error";
         token.role = null;
       }
       return token;
@@ -78,6 +95,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           ...session,
           user: null,
           error: "NotAllowlisted",
+          denyReason: token.denyReason || "not_allowed",
         };
       }
       session.user = {

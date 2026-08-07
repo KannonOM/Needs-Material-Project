@@ -295,8 +295,15 @@ button{cursor:pointer}
 .admin-page .admin-filters-row{
   grid-template-columns:minmax(0,1.4fr) auto auto;
 }
-.admin-users-table{min-width:1100px}
+.admin-users-table{min-width:1280px}
 .admin-actions{display:flex;gap:8px;flex-wrap:wrap}
+.admin-email-note{
+  margin:8px 0 0;
+  color:var(--amber);
+  font-size:13px;
+  font-weight:600;
+  max-width:42rem;
+}
 .you-tag{
   display:inline-flex;
   margin-left:8px;
