@@ -5,6 +5,7 @@ import { isUuid } from "../../../../../lib/needs-material/map";
 import {
   getAppBaseUrl,
   isInviteEmailConfigured,
+  isLocalAppUrl,
   sendInviteEmail,
 } from "../../../../../lib/email/invite";
 
@@ -27,6 +28,7 @@ export async function POST(_request, context) {
             "Invitation email is not configured. Set RESEND_API_KEY and INVITE_FROM_EMAIL, or use Copy Sign-In Link.",
           inviteEmailConfigured: false,
           signInUrl: getAppBaseUrl(),
+          isLocalSignInUrl: isLocalAppUrl(),
         },
         { status: 400 }
       );
@@ -62,6 +64,7 @@ export async function POST(_request, context) {
           error: emailResult.reason || "Invitation email could not be sent",
           inviteEmailConfigured: true,
           signInUrl: getAppBaseUrl(),
+          isLocalSignInUrl: isLocalAppUrl(),
         },
         { status: 502 }
       );
@@ -94,6 +97,7 @@ export async function POST(_request, context) {
       email: emailResult,
       inviteEmailConfigured: true,
       signInUrl: getAppBaseUrl(),
+      isLocalSignInUrl: isLocalAppUrl(),
     });
   } catch (error) {
     console.error("POST /api/allowed-users/[id]/resend-invite failed", error);

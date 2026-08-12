@@ -12,6 +12,7 @@ import {
 import {
   getAppBaseUrl,
   isInviteEmailConfigured,
+  isLocalAppUrl,
   sendInviteEmail,
 } from "../../../lib/email/invite";
 
@@ -70,6 +71,7 @@ export async function GET() {
       users: (data || []).map(mapAllowedUser),
       inviteEmailConfigured: isInviteEmailConfigured(),
       signInUrl: getAppBaseUrl(),
+      isLocalSignInUrl: isLocalAppUrl(),
     });
   } catch (error) {
     console.error("GET /api/allowed-users failed", error);
@@ -171,6 +173,7 @@ export async function POST(request) {
       email: emailResult,
       inviteEmailConfigured: isInviteEmailConfigured(),
       signInUrl: getAppBaseUrl(),
+      isLocalSignInUrl: isLocalAppUrl(),
     });
   } catch (error) {
     console.error("POST /api/allowed-users failed", error);

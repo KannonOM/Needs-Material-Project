@@ -12,6 +12,7 @@ export default function UserTable({
   loading,
   currentUserEmail,
   inviteEmailConfigured = false,
+  isLocalSignInUrl = true,
   onEdit,
   onActivate,
   onDeactivate,
@@ -86,7 +87,7 @@ export default function UserTable({
                             title={
                               inviteEmailConfigured
                                 ? "Resend invitation email"
-                                : "Email is not configured (RESEND_API_KEY / INVITE_FROM_EMAIL)"
+                                : "Email invitations are not configured."
                             }
                           >
                             Resend Invite
@@ -94,7 +95,11 @@ export default function UserTable({
                           <Button
                             className="edit-btn"
                             onClick={() => onCopySignInLink(user)}
-                            title="Copy dashboard sign-in link"
+                            title={
+                              isLocalSignInUrl
+                                ? "Local development link — only works on this computer."
+                                : "Copy dashboard sign-in link"
+                            }
                           >
                             Copy Sign-In Link
                           </Button>

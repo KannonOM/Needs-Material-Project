@@ -295,6 +295,7 @@ export default function SundayPrototype(){
   const [loadingUsers,setLoadingUsers]=useState(false);
   const [inviteEmailConfigured,setInviteEmailConfigured]=useState(false);
   const [signInUrl,setSignInUrl]=useState("http://localhost:3000");
+  const [isLocalSignInUrl,setIsLocalSignInUrl]=useState(true);
   const [search,setSearch]=useState("");
   const [kpiFilter,setKpiFilter]=useState("all");
   const [sortKey,setSortKey]=useState("due_date");
@@ -511,6 +512,7 @@ export default function SundayPrototype(){
           setUsers(data.users||[]);
           setInviteEmailConfigured(Boolean(data.inviteEmailConfigured));
           if(data.signInUrl)setSignInUrl(data.signInUrl);
+          if(typeof data.isLocalSignInUrl==="boolean")setIsLocalSignInUrl(data.isLocalSignInUrl);
         }
       }catch(error){
         console.error(error);
@@ -587,6 +589,7 @@ export default function SundayPrototype(){
       setInviteEmailConfigured(data.inviteEmailConfigured);
     }
     if(data.signInUrl)setSignInUrl(data.signInUrl);
+    if(typeof data.isLocalSignInUrl==="boolean")setIsLocalSignInUrl(data.isLocalSignInUrl);
     await loadOwnerOptions();
     notify(data.note||`${data.user.name} added`);
     return data.user;
@@ -657,6 +660,7 @@ export default function SundayPrototype(){
         setInviteEmailConfigured(data.inviteEmailConfigured);
       }
       if(data.signInUrl)setSignInUrl(data.signInUrl);
+      if(typeof data.isLocalSignInUrl==="boolean")setIsLocalSignInUrl(data.isLocalSignInUrl);
       if(!res.ok)throw new Error(data.error||"Could not resend invitation");
       if(data.user)setUsers(prev=>prev.map(u=>u.id===data.user.id?data.user:u));
       notify(data.note||`Invitation resent to ${user.email}`);
@@ -669,9 +673,18 @@ export default function SundayPrototype(){
   async function copySignInLink(){
     try{
       await navigator.clipboard.writeText(signInUrl);
-      notify("Sign-in link copied");
+      notify(
+        isLocalSignInUrl
+          ?"Local development link — only works on this computer."
+          :"Sign-in link copied"
+      );
     }catch{
-      window.prompt("Copy this sign-in link:",signInUrl);
+      window.prompt(
+        isLocalSignInUrl
+          ?"Local development link — only works on this computer. Copy:"
+          :"Copy this sign-in link:",
+        signInUrl
+      );
     }
   }
 
@@ -818,6 +831,7 @@ export default function SundayPrototype(){
             loading={loadingUsers}
             currentUserEmail={session?.user?.email||""}
             inviteEmailConfigured={inviteEmailConfigured}
+            isLocalSignInUrl={isLocalSignInUrl}
             onCreate={createUser}
             onUpdate={updateUser}
             onActivate={activateUser}

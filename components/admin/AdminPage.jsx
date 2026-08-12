@@ -11,6 +11,7 @@ export default function AdminPage({
   loading,
   currentUserEmail,
   inviteEmailConfigured = false,
+  isLocalSignInUrl = true,
   onCreate,
   onUpdate,
   onActivate,
@@ -67,10 +68,15 @@ export default function AdminPage({
         <div>
           <h1>Administration</h1>
           <p>Manage dashboard access and purchasing users</p>
-          {!inviteEmailConfigured && (
+          {isLocalSignInUrl && (
             <p className="admin-email-note">
-              Invitation email is not configured. Use Copy Sign-In Link, or set
-              RESEND_API_KEY and INVITE_FROM_EMAIL.
+              Local development mode: copied sign-in links only work on this
+              computer. External user sign-in should be tested after deployment.
+            </p>
+          )}
+          {!inviteEmailConfigured && (
+            <p className="admin-email-note admin-email-note-secondary">
+              Email invitations are not configured.
             </p>
           )}
         </div>
@@ -124,6 +130,7 @@ export default function AdminPage({
         loading={loading}
         currentUserEmail={currentUserEmail}
         inviteEmailConfigured={inviteEmailConfigured}
+        isLocalSignInUrl={isLocalSignInUrl}
         onEdit={(user) => setModal({ mode: "edit", user })}
         onActivate={onActivate}
         onDeactivate={onDeactivate}
